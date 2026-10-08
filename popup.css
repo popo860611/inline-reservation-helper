@@ -30,6 +30,54 @@ header { margin-bottom: 18px; }
 h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
 .lead { margin: 6px 0 0; color: #5c685f; font-size: 13px; }
 
+.update-card {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 16px;
+  border: 1px solid #bfd7c4;
+  border-radius: 12px;
+  background: rgba(235, 248, 237, 0.94);
+  padding: 10px 12px;
+  color: #264d31;
+}
+
+.update-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #2b8a45;
+  box-shadow: 0 0 0 3px rgba(43, 138, 69, 0.14);
+}
+
+.update-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  line-height: 1.35;
+}
+
+.update-copy strong { font-size: 12px; }
+
+#update-mode {
+  overflow: hidden;
+  color: #56705d;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-pill {
+  border-radius: 999px;
+  background: #d9eddd;
+  padding: 4px 7px;
+  color: #30603b;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 form { display: grid; gap: 12px; }
 label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; }
 

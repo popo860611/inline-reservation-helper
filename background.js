@@ -74,6 +74,20 @@ async function restoreAlarm() {
 
 chrome.runtime.onStartup.addListener(restoreAlarm);
 chrome.runtime.onInstalled.addListener(restoreAlarm);
+chrome.runtime.onInstalled.addListener(async ({ reason, previousVersion }) => {
+  if (reason === "update") {
+    const version = chrome.runtime.getManifest().version;
+    await chrome.storage.local.set({
+      updateStatus: `已從 v${previousVersion || "舊版"} 更新至 v${version}`
+    });
+  }
+});
+
+chrome.runtime.onUpdateAvailable.addListener(async (details) => {
+  await chrome.storage.local.set({
+    updateStatus: `v${details.version} 已下載，瀏覽器閒置後會自動套用`
+  });
+});
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   const { reservation } = await chrome.storage.local.get("reservation");

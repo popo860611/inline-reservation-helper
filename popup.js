@@ -16,6 +16,17 @@ const fields = {
 const form = document.querySelector("#reservation-form");
 const statusBox = document.querySelector("#status");
 
+async function renderUpdateStatus() {
+  const manifest = chrome.runtime.getManifest();
+  const { updateStatus } = await chrome.storage.local.get("updateStatus");
+  document.querySelector("#extension-version").textContent = `v${manifest.version}`;
+  document.querySelector("#update-mode").textContent = updateStatus || (
+    manifest.update_url
+      ? "已啟用，由瀏覽器自動安裝新版"
+      : "Git 開發版：自動顯示版本，更新後需重新載入"
+  );
+}
+
 function setStatus(message, kind = "") {
   statusBox.textContent = message;
   statusBox.className = kind;
@@ -142,4 +153,6 @@ document.querySelector("#cancel").addEventListener("click", async () => {
   setStatus("排程已取消。");
 });
 
-restore().catch((error) => setStatus(error.message, "error"));
+Promise.all([restore(), renderUpdateStatus()]).catch((error) =>
+  setStatus(error.message, "error")
+);

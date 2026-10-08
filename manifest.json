@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "inline 訂位快手",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "在訂位開放時開啟已預填日期、人數與時段的 inline 官方頁面。",
   "permissions": ["alarms", "storage"],
   "background": {
