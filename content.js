@@ -40,11 +40,48 @@
       .trim();
   }
 
-  function findTimeButton(time) {
-    const wanted = normalizeTime(time);
-    return [...document.querySelectorAll("button")].find((button) =>
-      visible(button) && !button.disabled && normalizeTime(button.textContent) === wanted
-    );
+  function minutes(value) {
+    const match = normalizeTime(value).match(/(\d{1,2}):(\d{2})/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  }
+
+  function findTimeButtonInRange(start, end) {
+    const min = minutes(start);
+    const max = minutes(end);
+    return [...document.querySelectorAll("button")]
+      .filter((button) => visible(button) && !button.disabled)
+      .map((button) => ({ button, value: minutes(button.textContent) }))
+      .filter((item) => item.value !== null && item.value >= min && item.value <= max)
+      .sort((a, b) => a.value - b.value)[0]?.button || null;
+  }
+
+  function nextDate(value) {
+    const date = new Date(`${value}T12:00:00`);
+    date.setDate(date.getDate() + 1);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function encodePrefill(reservation, date) {
+    const json = JSON.stringify({
+      language: reservation.language || "zh",
+      date,
+      adults: Number(reservation.adults),
+      kids: Number(reservation.children || 0),
+      time: reservation.timeStart
+    });
+    return btoa(unescape(encodeURIComponent(json)));
+  }
+
+  function navigateToDate(reservation, date) {
+    const url = new URL(location.href);
+    url.searchParams.set("pre_filled_form", encodePrefill(reservation, date));
+    url.searchParams.set("inline_helper", "1");
+    chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` }).then(() => {
+      location.replace(url.toString());
+    });
   }
 
   function setNativeValue(element, value) {
@@ -97,6 +134,11 @@
       const { reservation } = await chrome.storage.local.get("reservation");
       if (!reservation?.enabled && !new URL(location.href).searchParams.has("inline_helper")) return;
 
+      if (!new URL(location.href).searchParams.has("inline_helper")) {
+        navigateToDate(reservation, reservation.dateStart);
+        return;
+      }
+
       if (hasCaptcha()) {
         const captchaState = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
         captchaState.captchaSeen = true;
@@ -118,12 +160,24 @@
         }
       }
 
-      const timeButton = findTimeButton(reservation.time);
+      const kidPicker = document.querySelector("#kid-picker");
+      if (kidPicker) {
+        const option = [...kidPicker.options].find((item) =>
+          (item.textContent || "").includes(`${reservation.children || 0}位小孩`)
+        );
+        if (option && String(kidPicker.value) !== String(option.value)) {
+          setNativeValue(kidPicker, option.value);
+          report("選人數", `已選擇 ${reservation.adults} 位大人、${reservation.children || 0} 位小孩`);
+          return;
+        }
+      }
+
+      const timeButton = findTimeButtonInRange(reservation.timeStart, reservation.timeEnd);
       const bookingButton = exactButton("完成預訂");
       if (timeButton && !bookingButton) {
         const attempts = Number(state.timeClickAttempts || 0);
         if (attempts >= 2) {
-          report("請手動", `${reservation.time} 自動點擊兩次仍未生效，請手動點時段`, "error");
+          report("請手動", `${reservation.timeStart}–${reservation.timeEnd} 的時段自動點擊兩次仍未生效`, "error");
           return;
         }
         state.timeClickAttempts = attempts + 1;
@@ -131,8 +185,8 @@
         report(
           "選時段",
           state.captchaSeen
-            ? `CAPTCHA 已通過，重新選擇 ${reservation.time}`
-            : `正在選擇 ${reservation.time}`
+            ? `CAPTCHA 已通過，重新選擇 ${(timeButton.textContent || "").trim()}`
+            : `正在選擇 ${(timeButton.textContent || "").trim()}`
         );
         timeButton.click();
         return;
@@ -191,7 +245,18 @@
       }
 
       if (!timeButton && adultPicker && !bookingButton) {
-        report("無12點", `隨機日期目前沒有 ${reservation.time} 可選`, "error");
+        const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
+        const current = lastSelectedDate || reservation.dateStart;
+        const following = nextDate(current);
+        const scanCount = Number(state.scanCount || 0) + 1;
+        state.scanCount = scanCount;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+        if (following <= reservation.dateEnd && scanCount < 14) {
+          report("下一天", `${current} 沒有區間內時段，接著檢查 ${following}`);
+          setTimeout(() => navigateToDate(reservation, following), 1500);
+        } else {
+          report("沒有空位", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有找到 ${reservation.timeStart}–${reservation.timeEnd}`, "error");
+        }
       }
     } finally {
       busy = false;

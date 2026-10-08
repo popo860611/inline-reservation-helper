@@ -1,18 +1,24 @@
 {
   "manifest_version": 3,
   "name": "inline 訂位快手",
-  "version": "0.2.0",
-  "description": "在訂位開放時開啟已預填日期、人數與時段的 inline 官方頁面。",
+  "version": "0.3.0",
+  "description": "依餐廳、日期區間、時間區間與人數，自動尋找 inline 可用訂位。",
   "permissions": ["alarms", "storage"],
+  "host_permissions": ["https://api.github.com/*"],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
       "matches": [
-        "https://inline.app/booking/-LDKPhTT6bNhwjRVHpC2/-LDKPhTT6bNhwjRVHpC3*"
+        "https://inline.app/booking/*"
       ],
       "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://dining.inline.app/*"],
+      "js": ["search.js"],
       "run_at": "document_idle"
     }
   ],

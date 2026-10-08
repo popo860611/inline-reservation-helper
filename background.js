@@ -9,13 +9,14 @@ function utf8ToBase64(value) {
 }
 
 function buildBookingUrl(reservation) {
-  const url = new URL(reservation.bookingUrl);
-  const selectedDate = reservation.date || randomFutureDate(reservation.randomDays || 30);
+  const url = new URL(reservation.restaurantQuery);
+  const selectedDate = reservation.dateStart;
   const prefilled = {
     language: reservation.language || "zh",
     date: selectedDate,
     adults: Number(reservation.adults),
-    time: reservation.time
+    kids: Number(reservation.children || 0),
+    time: reservation.timeStart
   };
 
   url.searchParams.set("pre_filled_form", utf8ToBase64(JSON.stringify(prefilled)));
@@ -23,17 +24,17 @@ function buildBookingUrl(reservation) {
   return { url: url.toString(), selectedDate };
 }
 
-function randomFutureDate(days) {
-  const offset = 1 + Math.floor(Math.random() * Math.max(1, Number(days)));
-  const date = new Date();
-  date.setDate(date.getDate() + offset);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 async function openReservation(reservation) {
+  if (!/^https:\/\//i.test(reservation.restaurantQuery)) {
+    const searchUrl = new URL("https://dining.inline.app/zh-tw/");
+    searchUrl.hash = `inline-helper-search=${encodeURIComponent(reservation.restaurantQuery)}`;
+    await chrome.tabs.create({ url: searchUrl.toString(), active: true });
+    await chrome.storage.local.set({
+      lastOpenedAt: Date.now(),
+      flowStatus: `正在搜尋：${reservation.restaurantQuery}`
+    });
+    return;
+  }
   const booking = buildBookingUrl(reservation);
   await chrome.tabs.create({ url: booking.url, active: true });
   await chrome.action.setBadgeBackgroundColor({ color: "#16803c" });
@@ -47,7 +48,8 @@ async function openReservation(reservation) {
 }
 
 async function prepareReservation(reservation) {
-  const url = new URL(reservation.bookingUrl);
+  if (!/^https:\/\//i.test(reservation.restaurantQuery)) return;
+  const url = new URL(reservation.restaurantQuery);
   url.searchParams.set("language", "zh-tw");
   await chrome.tabs.create({ url: url.toString(), active: true });
   await chrome.action.setBadgeBackgroundColor({ color: "#aa6f00" });
@@ -74,21 +76,6 @@ async function restoreAlarm() {
 
 chrome.runtime.onStartup.addListener(restoreAlarm);
 chrome.runtime.onInstalled.addListener(restoreAlarm);
-chrome.runtime.onInstalled.addListener(async ({ reason, previousVersion }) => {
-  if (reason === "update") {
-    const version = chrome.runtime.getManifest().version;
-    await chrome.storage.local.set({
-      updateStatus: `已從 v${previousVersion || "舊版"} 更新至 v${version}`
-    });
-  }
-});
-
-chrome.runtime.onUpdateAvailable.addListener(async (details) => {
-  await chrome.storage.local.set({
-    updateStatus: `v${details.version} 已下載，瀏覽器閒置後會自動套用`
-  });
-});
-
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   const { reservation } = await chrome.storage.local.get("reservation");
   if (!reservation?.enabled) return;
@@ -106,6 +93,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "PING_BACKGROUND") {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+
   if (message.type === "FLOW_STATUS") {
     const status = String(message.status || "").slice(0, 8);
     chrome.action.setBadgeBackgroundColor({

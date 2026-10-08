@@ -11,83 +11,74 @@
       <header>
         <p class="eyebrow">RESERVATION HELPER</p>
         <h1>inline 訂位快手</h1>
-        <p class="lead">開放瞬間帶你到已預填的官方訂位頁。</p>
+        <p class="lead">輸入餐廳與可接受區間，其餘交給訂位助手。</p>
       </header>
 
       <section class="update-card" role="status" aria-live="polite" aria-atomic="true">
         <span class="update-dot" aria-hidden="true"></span>
-        <span class="update-copy">
-          <strong>自動更新</strong>
-          <span id="update-mode">Git 開發版：更新後需重新載入</span>
-        </span>
-        <span id="extension-version" class="version-pill">v0.2.0</span>
+        <span class="update-copy"><strong>版本更新</strong><span id="update-mode">正在檢查版本…</span></span>
+        <button id="apply-update" class="update-button" type="button" hidden>更新</button>
+        <span id="extension-version" class="version-pill">v0.3.0</span>
       </section>
 
       <form id="reservation-form">
-        <label>
-          餐廳名稱
-          <input id="restaurant-name" autocomplete="off" placeholder="例如：想訂的餐廳" required />
-        </label>
-
-        <label>
-          inline 訂位網址
-          <input id="booking-url" type="url" value="https://inline.app/booking/-LDKPhTT6bNhwjRVHpC2/-LDKPhTT6bNhwjRVHpC3" required />
-        </label>
-
-        <div class="grid">
+        <section class="form-section">
+          <p class="section-label"><span>1</span> 想訂哪裡</p>
           <label>
-            固定日期（留白＝隨機）
-            <input id="booking-date" type="date" />
+            餐廳名稱或 inline 訂位網址
+            <input id="restaurant-query" autocomplete="off" placeholder="例如：辛殿信義店，或貼上 inline 網址" required />
           </label>
-          <label>
-            用餐時間
-            <input id="booking-time" type="time" value="12:00" required />
-          </label>
-        </div>
+          <p class="helper">輸入名稱會開啟 inline 官方搜尋；同名分店需選一次。</p>
+        </section>
 
-        <label>
-          提前暖機（分鐘）
-          <input id="prep-minutes" type="number" min="0" max="30" value="5" required />
-        </label>
+        <section class="form-section">
+          <p class="section-label"><span>2</span> 可接受條件</p>
+          <div class="grid">
+            <label>開始日期<input id="date-start" type="date" required /></label>
+            <label>結束日期<input id="date-end" type="date" required /></label>
+          </div>
+          <div class="grid">
+            <label>最早時間<input id="time-start" type="time" value="11:30" required /></label>
+            <label>最晚時間<input id="time-end" type="time" value="12:30" required /></label>
+          </div>
+          <div class="grid">
+            <label>大人<input id="adults" type="number" min="1" max="20" value="3" required /></label>
+            <label>小孩<input id="children" type="number" min="0" max="20" value="0" required /></label>
+          </div>
+        </section>
 
-        <div class="grid">
-          <label>
-            人數
-            <input id="adults" type="number" min="1" max="8" value="3" required />
-          </label>
-          <label>
-            自動啟動時間（排程才填）
-            <input id="release-at" type="datetime-local" />
-          </label>
-        </div>
+        <section class="form-section">
+          <p class="section-label"><span>3</span> 訂位資料</p>
+          <fieldset>
+            <legend>只儲存在這台瀏覽器</legend>
+            <input id="contact-name" autocomplete="name" placeholder="訂位姓名" required />
+            <input id="contact-phone" type="tel" autocomplete="tel" placeholder="手機號碼" required />
+            <input id="contact-email" type="email" autocomplete="email" placeholder="Email（頁面要求時填入）" />
+          </fieldset>
+        </section>
 
-        <label>
-          隨機日期範圍（未來天數）
-          <input id="random-days" type="number" min="1" max="60" value="30" required />
-        </label>
-
-        <fieldset>
-          <legend>聯絡資料（只存在這台瀏覽器）</legend>
-          <input id="contact-name" autocomplete="name" placeholder="訂位姓名" />
-          <input id="contact-phone" type="tel" autocomplete="tel" placeholder="手機號碼" />
-          <input id="contact-email" type="email" autocomplete="email" placeholder="Email（頁面要求時填入）" />
-        </fieldset>
-
-        <label class="check-row">
-          <input id="auto-submit" type="checkbox" checked />
-          無付款／OTP 時自動送出最終訂位
-        </label>
+        <details>
+          <summary>排程與進階選項</summary>
+          <div class="details-body">
+            <div class="grid">
+              <label>啟動時間<input id="release-at" type="datetime-local" /></label>
+              <label>提前暖機<input id="prep-minutes" type="number" min="0" max="30" value="5" /></label>
+            </div>
+            <label class="check-row"><input id="auto-submit" type="checkbox" checked />無付款／OTP 時自動送出</label>
+          </div>
+        </details>
 
         <div class="actions">
-          <button class="primary" type="submit">儲存並啟用</button>
-          <button id="open-now" type="button">現在啟動自動訂位</button>
+          <button id="open-now" class="primary" type="button">現在開始找位</button>
+          <button type="submit">設定排程</button>
         </div>
         <button id="cancel" class="quiet" type="button">取消排程</button>
       </form>
 
-      <section id="status" aria-live="polite"></section>
-      <p class="footnote">暖機可先確認登入與喚醒瀏覽器；不會自動送出、付款、破解驗證碼或重複刷新。</p>
+      <section id="status" aria-live="polite" aria-atomic="true"></section>
+      <p class="footnote">CAPTCHA 需手動；付款、信用卡與 OTP 會停下讓你確認。</p>
     </main>
+    <script src="update-config.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

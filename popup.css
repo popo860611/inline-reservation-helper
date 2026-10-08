@@ -32,7 +32,7 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
 
 .update-card {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   margin: -4px 0 16px;
@@ -78,8 +78,62 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
   white-space: nowrap;
 }
 
+.update-button {
+  border-color: #2b7740;
+  border-radius: 999px;
+  background: #2b7740;
+  padding: 5px 9px;
+  color: #fff;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.update-card.available .update-dot {
+  background: #db7a16;
+  box-shadow: 0 0 0 3px rgba(219, 122, 22, 0.16);
+}
+
 form { display: grid; gap: 12px; }
 label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; }
+
+.form-section {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid rgba(48, 96, 59, 0.14);
+  padding-top: 13px;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: #274e32;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.section-label span {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: #226c36;
+  color: #fff;
+  font-size: 10px;
+}
+
+.helper { margin: -3px 0 0; color: #6a766e; font-size: 10px; line-height: 1.45; }
+
+details {
+  border: 1px solid #d6ddd6;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+summary { padding: 11px 12px; color: #405047; font-size: 12px; font-weight: 750; cursor: pointer; }
+.details-body { display: grid; gap: 10px; padding: 0 12px 12px; }
 
 fieldset {
   display: grid;
