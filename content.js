@@ -98,6 +98,9 @@
       if (!reservation?.enabled && !new URL(location.href).searchParams.has("inline_helper")) return;
 
       if (hasCaptcha()) {
+        const captchaState = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+        captchaState.captchaSeen = true;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(captchaState));
         report("CAPTCHA", "等待你手動完成人類驗證", "error");
         return;
       }
@@ -117,16 +120,31 @@
 
       const timeButton = findTimeButton(reservation.time);
       const bookingButton = exactButton("完成預訂");
-      if (timeButton && !state.timeSelected) {
-        state.timeSelected = true;
+      if (timeButton && !bookingButton) {
+        const attempts = Number(state.timeClickAttempts || 0);
+        if (attempts >= 2) {
+          report("請手動", `${reservation.time} 自動點擊兩次仍未生效，請手動點時段`, "error");
+          return;
+        }
+        state.timeClickAttempts = attempts + 1;
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-        report("選時段", `正在選擇 ${reservation.time}`);
+        report(
+          "選時段",
+          state.captchaSeen
+            ? `CAPTCHA 已通過，重新選擇 ${reservation.time}`
+            : `正在選擇 ${reservation.time}`
+        );
         timeButton.click();
         return;
       }
 
-      if (bookingButton && state.timeSelected && !state.bookingAdvanced) {
-        state.bookingAdvanced = true;
+      if (bookingButton && adultPicker) {
+        const attempts = Number(state.bookingClickAttempts || 0);
+        if (attempts >= 2) {
+          report("請手動", "自動進入資料頁兩次仍未生效，請手動按完成預訂", "error");
+          return;
+        }
+        state.bookingClickAttempts = attempts + 1;
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
         report("下一步", "正在進入訂位資料頁");
         bookingButton.click();
@@ -172,7 +190,7 @@
         return;
       }
 
-      if (!timeButton && adultPicker) {
+      if (!timeButton && adultPicker && !bookingButton) {
         report("無12點", `隨機日期目前沒有 ${reservation.time} 可選`, "error");
       }
     } finally {

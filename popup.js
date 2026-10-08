@@ -66,9 +66,11 @@ async function save(reservation) {
 }
 
 async function restore() {
-  const { reservation, lastOpenedAt } = await chrome.storage.local.get([
+  const { reservation, lastOpenedAt, flowStatus, lastSelectedDate } = await chrome.storage.local.get([
     "reservation",
-    "lastOpenedAt"
+    "lastOpenedAt",
+    "flowStatus",
+    "lastSelectedDate"
   ]);
   if (reservation) {
     for (const [key, field] of Object.entries(fields)) {
@@ -80,7 +82,10 @@ async function restore() {
   }
 
   const alarm = await chrome.alarms.get("inline-reservation-open");
-  if (alarm) {
+  if (flowStatus) {
+    const dateText = lastSelectedDate ? `；本次日期 ${lastSelectedDate}` : "";
+    setStatus(`${flowStatus}${dateText}`);
+  } else if (alarm) {
     setStatus(`已排程：${new Date(alarm.scheduledTime).toLocaleString("zh-TW")}`, "ok");
   } else if (lastOpenedAt) {
     setStatus(`上次開啟：${new Date(lastOpenedAt).toLocaleString("zh-TW")}`);
