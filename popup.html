@@ -22,17 +22,17 @@
 
         <label>
           inline 訂位網址
-          <input id="booking-url" type="url" placeholder="https://inline.app/booking/..." required />
+          <input id="booking-url" type="url" value="https://inline.app/booking/-LDKPhTT6bNhwjRVHpC2/-LDKPhTT6bNhwjRVHpC3" required />
         </label>
 
         <div class="grid">
           <label>
-            用餐日期
-            <input id="booking-date" type="date" required />
+            固定日期（留白＝隨機）
+            <input id="booking-date" type="date" />
           </label>
           <label>
             用餐時間
-            <input id="booking-time" type="time" required />
+            <input id="booking-time" type="time" value="12:00" required />
           </label>
         </div>
 
@@ -44,17 +44,34 @@
         <div class="grid">
           <label>
             人數
-            <input id="adults" type="number" min="1" max="20" value="2" required />
+            <input id="adults" type="number" min="1" max="8" value="3" required />
           </label>
           <label>
-            訂位開放時間
-            <input id="release-at" type="datetime-local" required />
+            自動啟動時間（排程才填）
+            <input id="release-at" type="datetime-local" />
           </label>
         </div>
 
+        <label>
+          隨機日期範圍（未來天數）
+          <input id="random-days" type="number" min="1" max="60" value="30" required />
+        </label>
+
+        <fieldset>
+          <legend>聯絡資料（只存在這台瀏覽器）</legend>
+          <input id="contact-name" autocomplete="name" placeholder="訂位姓名" />
+          <input id="contact-phone" type="tel" autocomplete="tel" placeholder="手機號碼" />
+          <input id="contact-email" type="email" autocomplete="email" placeholder="Email（頁面要求時填入）" />
+        </fieldset>
+
+        <label class="check-row">
+          <input id="auto-submit" type="checkbox" checked />
+          無付款／OTP 時自動送出最終訂位
+        </label>
+
         <div class="actions">
           <button class="primary" type="submit">儲存並啟用</button>
-          <button id="open-now" type="button">現在開啟測試</button>
+          <button id="open-now" type="button">現在啟動自動訂位</button>
         </div>
         <button id="cancel" class="quiet" type="button">取消排程</button>
       </form>

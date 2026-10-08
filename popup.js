@@ -5,7 +5,12 @@ const fields = {
   time: document.querySelector("#booking-time"),
   adults: document.querySelector("#adults"),
   releaseAt: document.querySelector("#release-at"),
-  prepMinutes: document.querySelector("#prep-minutes")
+  prepMinutes: document.querySelector("#prep-minutes"),
+  randomDays: document.querySelector("#random-days"),
+  contactName: document.querySelector("#contact-name"),
+  contactPhone: document.querySelector("#contact-phone"),
+  contactEmail: document.querySelector("#contact-email"),
+  autoSubmit: document.querySelector("#auto-submit")
 };
 
 const form = document.querySelector("#reservation-form");
@@ -17,13 +22,15 @@ function setStatus(message, kind = "") {
 }
 
 function readReservation() {
-  const value = Object.fromEntries(
-    Object.entries(fields).map(([key, element]) => [key, element.value.trim()])
-  );
+  const value = Object.fromEntries(Object.entries(fields).map(([key, element]) => [
+    key,
+    element.type === "checkbox" ? element.checked : element.value.trim()
+  ]));
   return {
     ...value,
     adults: Number(value.adults),
     prepMinutes: Number(value.prepMinutes),
+    randomDays: Number(value.randomDays),
     language: "zh",
     enabled: true
   };
@@ -35,8 +42,8 @@ function validate(reservation) {
   if (url.protocol !== "https:" || !allowedHost || !url.pathname.startsWith("/booking/")) {
     throw new Error("請貼上 https://inline.app/booking/... 的官方訂位網址。");
   }
-  if (!reservation.date || !reservation.time || !reservation.releaseAt) {
-    throw new Error("請填妥日期、時段與訂位開放時間。");
+  if (!reservation.time) {
+    throw new Error("請填妥用餐時段。");
   }
   if (!Number.isInteger(reservation.adults) || reservation.adults < 1 || reservation.adults > 20) {
     throw new Error("人數需介於 1 到 20；仍以餐廳實際規則為準。");
@@ -47,6 +54,9 @@ function validate(reservation) {
     reservation.prepMinutes > 30
   ) {
     throw new Error("暖機時間需介於 0 到 30 分鐘。");
+  }
+  if (!Number.isInteger(reservation.randomDays) || reservation.randomDays < 1 || reservation.randomDays > 60) {
+    throw new Error("隨機日期範圍需介於 1 到 60 天。");
   }
 }
 
@@ -62,7 +72,10 @@ async function restore() {
   ]);
   if (reservation) {
     for (const [key, field] of Object.entries(fields)) {
-      if (reservation[key] !== undefined) field.value = reservation[key];
+      if (reservation[key] !== undefined) {
+        if (field.type === "checkbox") field.checked = Boolean(reservation[key]);
+        else field.value = reservation[key];
+      }
     }
   }
 
@@ -81,6 +94,7 @@ form.addEventListener("submit", async (event) => {
   try {
     const reservation = readReservation();
     validate(reservation);
+    if (!reservation.releaseAt) throw new Error("使用排程時，請填寫自動啟動時間。");
     const when = new Date(reservation.releaseAt).getTime();
     if (!Number.isFinite(when) || when <= Date.now()) {
       throw new Error("訂位開放時間必須晚於現在。");
@@ -108,7 +122,7 @@ document.querySelector("#open-now").addEventListener("click", async () => {
     await save(reservation);
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開啟訂位頁。");
-    setStatus("已開啟測試頁，請確認預填內容是否正確。", "ok");
+    setStatus("已啟動。若出現 CAPTCHA，請在頁面手動完成；插件會自動接續。", "ok");
   } catch (error) {
     setStatus(error.message, "error");
   }

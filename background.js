@@ -10,25 +10,39 @@ function utf8ToBase64(value) {
 
 function buildBookingUrl(reservation) {
   const url = new URL(reservation.bookingUrl);
+  const selectedDate = reservation.date || randomFutureDate(reservation.randomDays || 30);
   const prefilled = {
     language: reservation.language || "zh",
-    date: reservation.date,
+    date: selectedDate,
     adults: Number(reservation.adults),
     time: reservation.time
   };
 
   url.searchParams.set("pre_filled_form", utf8ToBase64(JSON.stringify(prefilled)));
-  return url.toString();
+  url.searchParams.set("inline_helper", "1");
+  return { url: url.toString(), selectedDate };
+}
+
+function randomFutureDate(days) {
+  const offset = 1 + Math.floor(Math.random() * Math.max(1, Number(days)));
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 async function openReservation(reservation) {
-  await chrome.tabs.create({ url: buildBookingUrl(reservation), active: true });
+  const booking = buildBookingUrl(reservation);
+  await chrome.tabs.create({ url: booking.url, active: true });
   await chrome.action.setBadgeBackgroundColor({ color: "#16803c" });
   await chrome.action.setBadgeText({ text: "GO" });
 
   await chrome.storage.local.set({
     lastOpenedAt: Date.now(),
-    lastOpenedUrl: buildBookingUrl(reservation)
+    lastOpenedUrl: booking.url,
+    lastSelectedDate: booking.selectedDate
   });
 }
 
@@ -78,6 +92,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "FLOW_STATUS") {
+    const status = String(message.status || "").slice(0, 8);
+    chrome.action.setBadgeBackgroundColor({
+      color: message.kind === "error" ? "#a22b26" : "#226c36"
+    });
+    chrome.action.setBadgeText({ text: status });
+    chrome.storage.local.set({ flowStatus: message.detail || message.status });
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message.type === "OPEN_NOW") {
     openReservation(message.reservation)
       .then(() => sendResponse({ ok: true }))

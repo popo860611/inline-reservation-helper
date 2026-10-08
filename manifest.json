@@ -7,6 +7,15 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://inline.app/booking/-LDKPhTT6bNhwjRVHpC2/-LDKPhTT6bNhwjRVHpC3*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_title": "inline 訂位快手",
     "default_popup": "popup.html"
