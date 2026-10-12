@@ -97,6 +97,14 @@ assert.match(content, /const helperUrl = new URLSearchParams\(location\.search\)
 assert.ok(content.indexOf("const helperUrl =") < content.indexOf("if (!helperUrl"));
 assert.match(content, /changes\.activeReservationTabId \|\| changes\.reservation/);
 assert.match(content, /report\("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位"\)/);
+assert.match(content, /function showPreviewComplete\(\)/);
+assert.match(content, /id = "inline-helper-preview-complete"/);
+assert.match(content, /尚未送出訂位/);
+assert.match(content, /role="status" aria-live="assertive" aria-atomic="true"/);
+assert.match(content, /role="dialog" aria-modal="true"/);
+assert.match(content, /event\.key === "Escape"/);
+assert.match(content, /prefers-reduced-motion:no-preference/);
+assert.match(content, /showPreviewComplete\(\);[\s\S]*report\("預演完成"/);
 assert.match(content, /previewCompletedAt: Date\.now\(\)/);
 assert.match(content, /reservation: \{ \.\.\.reservation, enabled: false \}/);
 assert.match(background, /openScopedReservationTab\("https:\/\/dining\.inline\.app\/zh-tw\/"\)/);

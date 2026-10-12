@@ -6,6 +6,56 @@
     chrome.runtime.sendMessage({ type: "FLOW_STATUS", status, detail, kind }).catch(() => {});
   }
 
+  function showPreviewComplete() {
+    if (document.querySelector("#inline-helper-preview-complete")) return;
+    const previouslyFocused = document.activeElement;
+    const host = document.createElement("div");
+    host.id = "inline-helper-preview-complete";
+    host.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:20px;background:rgba(15,23,42,.58);font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+    const root = host.attachShadow({ mode: "open" });
+    root.innerHTML = `
+      <style>
+        *{box-sizing:border-box}
+        .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+        .card{width:min(420px,100%);max-height:calc(100dvh - 32px);overflow:auto;border:2px solid #16743a;border-radius:20px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.3);color:#142218}
+        .head{display:flex;align-items:center;gap:12px;padding:22px 22px 14px;background:#e9f8ed}
+        .icon{display:grid;place-items:center;flex:0 0 48px;width:48px;height:48px;border-radius:50%;background:#16743a;color:#fff}
+        h2{margin:0;font-size:24px;line-height:1.25;font-weight:800}
+        .body{padding:18px 22px 22px}
+        .lead{margin:0 0 12px;font-size:17px;line-height:1.6;font-weight:650}
+        .warning{margin:0;padding:13px 14px;border:1px solid #d79b22;border-radius:12px;background:#fff7df;color:#6f4600;font-size:16px;line-height:1.5;font-weight:800}
+        .note{margin:12px 0 18px;color:#46534b;font-size:14px;line-height:1.55}
+        button{width:100%;min-height:48px;border:0;border-radius:12px;background:#16743a;color:#fff;font:inherit;font-size:16px;font-weight:750;cursor:pointer;touch-action:manipulation}
+        button:hover{background:#105c2d}
+        button:active{background:#0b4722}
+        button:focus-visible{outline:3px solid #f4b740;outline-offset:3px}
+        @media (prefers-reduced-motion:no-preference){.card{animation:enter .2s ease-out}@keyframes enter{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}}
+      </style>
+      <p class="sr-only" role="status" aria-live="assertive" aria-atomic="true">預演完成，尚未送出訂位。</p>
+      <section class="card" role="dialog" aria-modal="true" aria-labelledby="inline-helper-preview-title" aria-describedby="inline-helper-preview-description">
+        <div class="head">
+          <span class="icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <h2 id="inline-helper-preview-title">預演完成</h2>
+        </div>
+        <div class="body">
+          <p class="lead">已找到可用時段，並填妥目前頁面的訂位資料。</p>
+          <p class="warning">尚未送出訂位</p>
+          <p class="note" id="inline-helper-preview-description">這是預演結果，不代表訂位成功。插件沒有按下最後的確認訂位按鈕。</p>
+          <button type="button">我知道了</button>
+        </div>
+      </section>`;
+    const close = () => {
+      host.remove();
+      if (previouslyFocused?.isConnected && typeof previouslyFocused.focus === "function") previouslyFocused.focus();
+    };
+    root.querySelector("button").addEventListener("click", close);
+    host.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
+    });
+    document.documentElement.appendChild(host);
+    root.querySelector("button").focus();
+  }
+
   function visible(element) {
     if (!element) return false;
     const rect = element.getBoundingClientRect();
@@ -325,6 +375,7 @@
           reservation: { ...reservation, enabled: false },
           previewCompletedAt: Date.now()
         });
+        showPreviewComplete();
         report("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位");
         return;
       }
