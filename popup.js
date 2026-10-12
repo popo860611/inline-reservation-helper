@@ -19,7 +19,7 @@ const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.3";
+const BUILD_VERSION = "0.3.4";
 let pendingUpdateAction = null;
 
 function localDate(offset = 0) {

@@ -10,7 +10,9 @@
     const markdownMatch = raw.match(/\((https?:\/\/[^\s)]+)\)/i);
     const inlineUrlMatch = raw.match(/https?:\/\/[^\s<>"']*inline\.app\/booking\/[^\s<>"']+/i);
     const schemeLessMatch = raw.match(/(?:www\.)?(?:[a-z0-9-]+\.)?inline\.app\/booking\/[^\s<>"']+/i);
-    let candidate = markdownMatch?.[1] || inlineUrlMatch?.[0] || schemeLessMatch?.[0] || "";
+    const bookingPathMatch = raw.match(/(?:^|\s)(?:\/booking\/)?(-[A-Za-z0-9_-]+)\/(-[A-Za-z0-9_-]+)(?:\/form)?(?:\s|$)/);
+    let candidate = markdownMatch?.[1] || inlineUrlMatch?.[0] || schemeLessMatch?.[0] ||
+      (bookingPathMatch ? `https://inline.app/booking/${bookingPathMatch[1]}/${bookingPathMatch[2]}` : "");
     if (!candidate) {
       if (/https?:\/\//i.test(raw)) return { kind: "invalid-url", value: raw };
       return { kind: "name", value: raw.replace(/^\[|\]$/g, "").trim() };
@@ -25,6 +27,7 @@
       if (url.protocol !== "https:" || !officialHost || !url.pathname.startsWith("/booking/")) {
         return { kind: "invalid-url", value: candidate };
       }
+      url.pathname = url.pathname.replace(/\/form\/?$/, "");
       url.hash = "";
       return { kind: "url", value: url.toString() };
     } catch (_error) {

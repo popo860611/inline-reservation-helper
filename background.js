@@ -13,6 +13,7 @@ function buildBookingUrl(reservation) {
   const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
   if (normalized.kind !== "url") throw new Error("找不到有效的 inline 官方訂位網址，請重新貼上網址。");
   const url = new URL(normalized.value);
+  url.pathname = url.pathname.replace(/\/form\/?$/, "");
   const selectedDate = reservation.dateStart;
   const prefilled = {
     language: reservation.language || "zh",

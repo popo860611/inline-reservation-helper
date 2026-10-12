@@ -10,6 +10,9 @@ const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
 assert.equal(normalizeRestaurantInput(`inline.app/booking/-company/-branch`).kind, "url");
+assert.equal(normalizeRestaurantInput(`${bookingUrl}/form`).value, bookingUrl);
+assert.equal(normalizeRestaurantInput(`-company/-branch/form`).value, bookingUrl);
+assert.equal(normalizeRestaurantInput(`/booking/-company/-branch/form`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`[餐廳](${bookingUrl})`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`請開這個 ${bookingUrl} 謝謝`).kind, "url");
 assert.deepEqual(normalizeRestaurantInput("辛殿麻辣鍋 信義店"), { kind: "name", value: "辛殿麻辣鍋 信義店" });
