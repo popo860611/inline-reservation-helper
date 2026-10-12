@@ -119,6 +119,35 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
   box-shadow: 0 0 0 3px rgba(219, 122, 22, 0.16);
 }
 
+.run-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(48, 96, 59, 0.22);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: #274e32;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mode-badge {
+  border: 1px solid #2b7740;
+  border-radius: 999px;
+  background: #e6f3e9;
+  padding: 6px 10px;
+  color: #235f34;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mode-badge.live {
+  border-color: #a93d32;
+  background: #fff0ef;
+  color: #8d3027;
+}
+
 form { display: grid; gap: 12px; }
 label { display: grid; gap: 6px; font-size: 12px; font-weight: 700; }
 

@@ -11,8 +11,7 @@ const fields = {
   contactEmail: document.querySelector("#contact-email"),
   diningPurpose: document.querySelector("#dining-purpose"),
   releaseAt: document.querySelector("#release-at"),
-  prepMinutes: document.querySelector("#prep-minutes"),
-  autoSubmit: document.querySelector("#auto-submit")
+  prepMinutes: document.querySelector("#prep-minutes")
 };
 
 const statusBox = document.querySelector("#status");
@@ -22,7 +21,9 @@ const updateButton = document.querySelector("#apply-update");
 const reloadCard = document.querySelector("#reload-card");
 const backgroundVersionDetail = document.querySelector("#background-version-detail");
 const reloadExtensionButton = document.querySelector("#reload-extension");
-const BUILD_VERSION = "0.3.8";
+const liveMode = document.querySelector("#live-mode");
+const modeToggle = document.querySelector("#mode-toggle");
+const BUILD_VERSION = "0.3.9";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -49,6 +50,12 @@ function renderInitialUpdateStatus() {
   manualCheckReadyAt = performance.now() + 500;
 
   updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未手動檢查`;
+}
+
+function renderRunMode() {
+  modeToggle.textContent = liveMode.checked ? "實際｜可能送出" : "預演｜不送出";
+  modeToggle.classList.toggle("live", liveMode.checked);
+  modeToggle.setAttribute("aria-pressed", String(liveMode.checked));
 }
 
 async function checkBackgroundVersion() {
@@ -138,6 +145,17 @@ reloadExtensionButton.addEventListener("click", () => {
   chrome.runtime.reload();
 });
 
+modeToggle.addEventListener("click", () => {
+  liveMode.checked = !liveMode.checked;
+  renderRunMode();
+  setStatus(
+    liveMode.checked
+      ? "已切換為實際模式；無付款／OTP 且沒有 CAPTCHA 時，可能完成訂位。"
+      : "已切換為預演模式；只找位與填寫，不會送出最終訂位。",
+    liveMode.checked ? "error" : "ok"
+  );
+});
+
 window.addEventListener("pageshow", renderInitialUpdateStatus);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") renderInitialUpdateStatus();
@@ -154,6 +172,7 @@ function readReservation() {
   const value = Object.fromEntries(Object.entries(fields).map(([key, element]) => [
     key, element.type === "checkbox" ? element.checked : element.value.trim()
   ]));
+  value.autoSubmit = liveMode.checked;
   return {
     ...value,
     adults: Number(value.adults),
@@ -234,7 +253,13 @@ document.querySelector("#open-now").addEventListener("click", async () => {
     await save(reservation);
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
-    setStatus(response.mode === "url" ? "已忽略排程時間，立即開始尋找可用時段。" : "已忽略排程時間並開啟 inline 官方搜尋；若有多家分店，請選擇一次。", "ok");
+    const modeText = reservation.autoSubmit
+      ? "實際模式：找到無付款／OTP 的可用時段後會送出最終訂位。"
+      : "模擬模式：只找位與填寫，會停在最後送出前。";
+    const searchText = response.mode === "url"
+      ? "已忽略排程時間，立即開始尋找可用時段。"
+      : "已忽略排程時間並開啟 inline 官方搜尋；若有多家分店，請選擇一次。";
+    setStatus(`${modeText}${searchText}`, "ok");
   } catch (error) { setStatus(error.message, "error"); }
 });
 
@@ -245,4 +270,6 @@ document.querySelector("#cancel").addEventListener("click", async () => {
   setStatus("排程已取消。");
 });
 
+liveMode.checked = false;
+renderRunMode();
 Promise.all([restore(), renderInitialUpdateStatus(), checkBackgroundVersion()]).catch((error) => setStatus(error.message, "error"));

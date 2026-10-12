@@ -57,6 +57,12 @@ assert.match(popup, /window\.addEventListener\("pageshow", renderInitialUpdateSt
 assert.match(popup, /document\.visibilityState === "visible"/);
 assert.match(popup, /!event\.isTrusted/);
 assert.match(popup, /manualCheckReadyAt = performance\.now\(\) \+ 500/);
+assert.match(popupHtml, /id="live-mode" type="checkbox" hidden/);
+assert.match(popupHtml, /id="mode-toggle"[^>]*>預演｜不送出<\/button>/);
+assert.doesNotMatch(popupHtml, /id="auto-submit"/);
+assert.match(popup, /value\.autoSubmit = liveMode\.checked/);
+assert.match(popup, /liveMode\.checked = false/);
+assert.match(popup, /modeToggle\.addEventListener\("click"/);
 assert.match(popup, /asset\?\.name === "inline-reservation-helper\.zip"/);
 assert.match(popup, /updateButton\.textContent = `下載 v\$\{latestVersion\}`/);
 
@@ -66,7 +72,10 @@ assert.match(background, /chrome\.runtime\.getManifest\(\)\.version/);
 assert.match(background, /pendingRestaurantSearch/);
 assert.match(background, /diner-network-api\.inline\.app\/diner-network\/search/);
 assert.doesNotMatch(background, /new URL\(/);
-assert.doesNotMatch(fs.readFileSync(path.join(root, "content.js"), "utf8"), /new URL\(/);
+const content = fs.readFileSync(path.join(root, "content.js"), "utf8");
+assert.doesNotMatch(content, /new URL\(/);
+assert.ok(content.indexOf("if (!reservation.autoSubmit)") < content.indexOf("finalButton.click()"));
+assert.match(content, /已完成自動填寫，等待你送出/);
 assert.match(background, /chrome\.tabs\.create\(\{ url: "https:\/\/dining\.inline\.app\/zh-tw\/"/);
 assert.doesNotMatch(background, /inline-helper-search=/);
 
