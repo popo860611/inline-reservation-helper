@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, restaurantMatchScore, selectRestaurantMatch, timeToMinutes } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, restaurantMatchScore, selectRestaurantMatch, timeToMinutes } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -13,6 +13,10 @@ assert.equal(normalizeRestaurantInput(`inline.app/booking/-company/-branch`).kin
 assert.equal(normalizeRestaurantInput(`${bookingUrl}/form`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`-company/-branch/form`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`/booking/-company/-branch/form`).value, bookingUrl);
+assert.equal(
+  setUrlQueryParams(`${bookingUrl}/form?utm_source=test`, { inline_helper: "1", pre_filled_form: "abc+/=" }),
+  `${bookingUrl}?utm_source=test&inline_helper=1&pre_filled_form=abc%2B%2F%3D`
+);
 assert.equal(normalizeRestaurantInput(`[餐廳](${bookingUrl})`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`請開這個 ${bookingUrl} 謝謝`).kind, "url");
 assert.deepEqual(normalizeRestaurantInput("辛殿麻辣鍋 信義店"), { kind: "name", value: "辛殿麻辣鍋 信義店" });
@@ -52,6 +56,8 @@ const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
 assert.doesNotMatch(background, /PING_BACKGROUND/);
 assert.match(background, /pendingRestaurantSearch/);
 assert.match(background, /diner-network-api\.inline\.app\/diner-network\/search/);
+assert.doesNotMatch(background, /new URL\(/);
+assert.doesNotMatch(fs.readFileSync(path.join(root, "content.js"), "utf8"), /new URL\(/);
 assert.match(background, /chrome\.tabs\.create\(\{ url: "https:\/\/dining\.inline\.app\/zh-tw\/"/);
 assert.doesNotMatch(background, /inline-helper-search=/);
 

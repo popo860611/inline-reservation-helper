@@ -21,18 +21,31 @@
     candidate = trimUrlPunctuation(candidate);
     if (!/^https?:\/\//i.test(candidate)) candidate = `https://${candidate}`;
 
-    try {
-      const url = new URL(candidate);
-      const officialHost = url.hostname === "inline.app" || url.hostname.endsWith(".inline.app");
-      if (url.protocol !== "https:" || !officialHost || !url.pathname.startsWith("/booking/")) {
-        return { kind: "invalid-url", value: candidate };
-      }
-      url.pathname = url.pathname.replace(/\/form\/?$/, "");
-      url.hash = "";
-      return { kind: "url", value: url.toString() };
-    } catch (_error) {
+    const parsed = candidate.match(/^(https:)?\/\/([^/?#]+)(\/[^?#]*)?(\?[^#]*)?(?:#.*)?$/i);
+    if (!parsed) return { kind: "invalid-url", value: candidate };
+    const protocol = (parsed[1] || "").toLowerCase();
+    const host = (parsed[2] || "").toLowerCase();
+    const pathname = (parsed[3] || "/").replace(/\/form\/?$/, "");
+    const query = parsed[4] || "";
+    const officialHost = host === "inline.app" || host.endsWith(".inline.app");
+    if (protocol !== "https:" || !officialHost || !pathname.startsWith("/booking/")) {
       return { kind: "invalid-url", value: candidate };
     }
+    return { kind: "url", value: `https://${host}${pathname}${query}` };
+  }
+
+  function setUrlQueryParams(urlValue, entries) {
+    const withoutHash = String(urlValue || "").split("#", 1)[0];
+    const queryIndex = withoutHash.indexOf("?");
+    const base = (queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash).replace(/\/form\/?$/, "");
+    const query = queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : "";
+    const params = new URLSearchParams(query);
+    for (const [key, value] of Object.entries(entries || {})) {
+      if (value === undefined || value === null) continue;
+      params.set(key, String(value));
+    }
+    const serialized = params.toString();
+    return serialized ? `${base}?${serialized}` : base;
   }
 
   function normalizeTime(value) {
@@ -83,6 +96,7 @@
 
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
+    setUrlQueryParams,
     restaurantMatchScore,
     selectRestaurantMatch,
     normalizeTime,

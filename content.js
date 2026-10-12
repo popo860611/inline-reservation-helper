@@ -59,11 +59,12 @@
 
   function navigateToDate(reservation, date) {
     const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
-    const url = normalized.kind === "url" ? new URL(normalized.value) : new URL(location.href);
-    url.pathname = url.pathname.replace(/\/form\/?$/, "");
-    url.searchParams.set("pre_filled_form", encodePrefill(reservation, date));
-    url.searchParams.set("inline_helper", "1");
-    chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` }).then(() => location.replace(url.toString()));
+    const base = normalized.kind === "url" ? normalized.value : location.href;
+    const url = InlineHelperCommon.setUrlQueryParams(base, {
+      pre_filled_form: encodePrefill(reservation, date),
+      inline_helper: "1"
+    });
+    chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` }).then(() => location.replace(url));
   }
 
   function setNativeValue(element, value) {
@@ -209,7 +210,7 @@
     busy = true;
     try {
       const { reservation } = await chrome.storage.local.get("reservation");
-      const helperUrl = new URL(location.href).searchParams.has("inline_helper");
+      const helperUrl = new URLSearchParams(location.search).has("inline_helper");
       if (!reservation?.enabled && !helperUrl) return;
 
       if (isSuccessPage()) {
@@ -327,7 +328,7 @@
         finalButton.click();
       }
     } catch (error) {
-      report("發生錯誤", error?.message || "頁面流程無法繼續", "error");
+      report("發生錯誤", `訂位頁處理失敗：${error?.message || "頁面流程無法繼續"}`, "error");
     } finally {
       busy = false;
     }

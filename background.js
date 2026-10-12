@@ -12,8 +12,6 @@ function utf8ToBase64(value) {
 function buildBookingUrl(reservation) {
   const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
   if (normalized.kind !== "url") throw new Error("找不到有效的 inline 官方訂位網址，請重新貼上網址。");
-  const url = new URL(normalized.value);
-  url.pathname = url.pathname.replace(/\/form\/?$/, "");
   const selectedDate = reservation.dateStart;
   const prefilled = {
     language: reservation.language || "zh",
@@ -23,9 +21,11 @@ function buildBookingUrl(reservation) {
     time: reservation.timeStart
   };
 
-  url.searchParams.set("pre_filled_form", utf8ToBase64(JSON.stringify(prefilled)));
-  url.searchParams.set("inline_helper", "1");
-  return { url: url.toString(), selectedDate };
+  const url = InlineHelperCommon.setUrlQueryParams(normalized.value, {
+    pre_filled_form: utf8ToBase64(JSON.stringify(prefilled)),
+    inline_helper: "1"
+  });
+  return { url, selectedDate };
 }
 
 async function resolveRestaurantName(query) {
@@ -96,9 +96,8 @@ async function openReservation(reservation) {
 async function prepareReservation(reservation) {
   const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
   if (normalized.kind !== "url") return;
-  const url = new URL(normalized.value);
-  url.searchParams.set("language", "zh-tw");
-  await chrome.tabs.create({ url: url.toString(), active: true });
+  const url = InlineHelperCommon.setUrlQueryParams(normalized.value, { language: "zh-tw" });
+  await chrome.tabs.create({ url, active: true });
   await chrome.action.setBadgeBackgroundColor({ color: "#aa6f00" });
   await chrome.action.setBadgeText({ text: "READY" });
 }
@@ -152,7 +151,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "OPEN_NOW") {
     openReservation(message.reservation)
       .then((result) => sendResponse({ ok: true, ...result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+      .catch((error) => sendResponse({ ok: false, error: `背景開啟失敗：${error.message}` }));
     return true;
   }
 
