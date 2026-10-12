@@ -1,6 +1,7 @@
 (() => {
   let suggestionClicked = false;
   let searchFilled = false;
+  let started = false;
 
   function report(status, detail, kind = "ok") {
     chrome.runtime.sendMessage({ type: "FLOW_STATUS", status, detail, kind }).catch(() => {});
@@ -24,6 +25,11 @@
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
     return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+
+  async function isActiveFlowTab() {
+    const response = await chrome.runtime.sendMessage({ type: "CHECK_FLOW_SCOPE" });
+    return Boolean(response?.active);
   }
 
   function setNativeValue(input, value) {
@@ -81,6 +87,7 @@
   }
 
   async function start() {
+    if (started || !(await isActiveFlowTab())) return;
     const { pendingRestaurantSearch } = await chrome.storage.local.get("pendingRestaurantSearch");
     const query = String(pendingRestaurantSearch?.query || "").trim();
     const age = Date.now() - Number(pendingRestaurantSearch?.createdAt || 0);
@@ -88,15 +95,18 @@
       if (pendingRestaurantSearch) await chrome.storage.local.remove("pendingRestaurantSearch");
       return;
     }
+    started = true;
 
-    const observer = new MutationObserver(() => {
+    const inspectActiveResults = async () => {
+      if (!(await isActiveFlowTab())) return;
       fillSearch(query);
       inspectResults(query);
-    });
+    };
+    const observer = new MutationObserver(inspectActiveResults);
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    fillSearch(query);
-    inspectResults(query);
-    setTimeout(() => {
+    await inspectActiveResults();
+    setTimeout(async () => {
+      if (!(await isActiveFlowTab())) return;
       if (!inspectResults(query)) {
         chrome.storage.local.remove("pendingRestaurantSearch").catch(() => {});
         report("找不到", "官方搜尋沒有可開啟的訂位結果；請改貼餐廳的 inline 訂位網址", "error");
@@ -104,5 +114,10 @@
     }, 5000);
   }
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && (changes.activeReservationTabId || changes.pendingRestaurantSearch)) {
+      start().catch((error) => report("搜尋失敗", `餐廳名稱搜尋失敗：${error.message}`, "error"));
+    }
+  });
   start().catch((error) => report("搜尋失敗", `餐廳名稱搜尋失敗：${error.message}`, "error"));
 })();

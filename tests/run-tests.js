@@ -33,6 +33,10 @@ assert.equal(selectRestaurantMatch([
   { name: "同名餐廳 台北店", bookingLink: bookingUrl },
   { name: "同名餐廳 台北店", bookingLink: "https://inline.app/booking/-company/-other" }
 ], "同名餐廳 台北店"), null);
+assert.equal(selectRestaurantMatch([
+  { name: "涮乃葉日式涮涮鍋吃到飽 欣欣百貨店", bookingLink: bookingUrl },
+  { name: "涮乃葉日式涮涮鍋吃到飽 徐匯廣場店", bookingLink: "https://inline.app/booking/-company/-xuhui" }
+], "涮乃葉日式涮涮鍋"), null);
 
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
 const popup = fs.readFileSync(path.join(root, "popup.js"), "utf8");
@@ -63,6 +67,7 @@ assert.doesNotMatch(popupHtml, /id="auto-submit"/);
 assert.match(popup, /value\.autoSubmit = liveMode\.checked/);
 assert.match(popup, /liveMode\.checked = false/);
 assert.match(popup, /modeToggle\.addEventListener\("click"/);
+assert.match(popup, /remove\(\["activeReservationTabId", "pendingRestaurantSearch"\]\)/);
 assert.match(popup, /flowStatusKind === "error"/);
 assert.match(popup, /flowStatusKind === "ok"/);
 assert.match(popup, /asset\?\.name === "inline-reservation-helper\.zip"/);
@@ -72,16 +77,30 @@ const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
 assert.match(background, /message\.type === "PING_BACKGROUND"/);
 assert.match(background, /chrome\.runtime\.getManifest\(\)\.version/);
 assert.match(background, /flowStatusKind: message\.kind \|\| "ok"/);
+assert.match(background, /message\.type === "CHECK_FLOW_SCOPE"/);
+assert.match(background, /_sender\.tab\.id === activeReservationTabId/);
+assert.match(background, /openScopedReservationTab/);
+assert.match(background, /FLOW_SCOPE_MIGRATION = "0\.3\.12"/);
+assert.match(background, /migrateUnsafeGlobalFlow/);
+assert.match(background, /if \(reservation\) updates\.reservation = \{ \.\.\.reservation, enabled: false \}/);
+assert.match(background, /安全更新已停止舊任務/);
 assert.match(background, /pendingRestaurantSearch/);
 assert.match(background, /diner-network-api\.inline\.app\/diner-network\/search/);
 assert.doesNotMatch(background, /new URL\(/);
 const content = fs.readFileSync(path.join(root, "content.js"), "utf8");
 assert.doesNotMatch(content, /new URL\(/);
 assert.ok(content.indexOf("if (!reservation.autoSubmit)") < content.indexOf("finalButton.click()"));
+assert.match(content, /if \(!scope\?\.active\) return/);
+assert.match(content, /if \(!reservation\?\.enabled\) return/);
+assert.doesNotMatch(content, /!reservation\?\.enabled && !helperUrl/);
+assert.match(content, /changes\.activeReservationTabId \|\| changes\.reservation/);
 assert.match(content, /report\("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位"\)/);
 assert.match(content, /previewCompletedAt: Date\.now\(\)/);
 assert.match(content, /reservation: \{ \.\.\.reservation, enabled: false \}/);
-assert.match(background, /chrome\.tabs\.create\(\{ url: "https:\/\/dining\.inline\.app\/zh-tw\/"/);
+assert.match(background, /openScopedReservationTab\("https:\/\/dining\.inline\.app\/zh-tw\/"\)/);
 assert.doesNotMatch(background, /inline-helper-search=/);
+const search = fs.readFileSync(path.join(root, "search.js"), "utf8");
+assert.match(search, /CHECK_FLOW_SCOPE/);
+assert.match(search, /changes\.activeReservationTabId \|\| changes\.pendingRestaurantSearch/);
 
 console.log("All inline reservation helper tests passed.");

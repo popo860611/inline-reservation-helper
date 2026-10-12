@@ -23,7 +23,7 @@ const backgroundVersionDetail = document.querySelector("#background-version-deta
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.11";
+const BUILD_VERSION = "0.3.12";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -211,6 +211,7 @@ function validate(reservation, scheduling = false) {
 
 async function save(reservation, scheduling = false) {
   validate(reservation, scheduling);
+  await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"]);
   await chrome.storage.local.set({ reservation, flowStatus: "準備開始" });
 }
 

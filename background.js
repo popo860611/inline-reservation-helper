@@ -1,6 +1,24 @@
 const ALARM_NAME = "inline-reservation-open";
 const PREP_ALARM_NAME = "inline-reservation-prepare";
+const FLOW_SCOPE_MIGRATION = "0.3.12";
 importScripts("common.js");
+
+async function migrateUnsafeGlobalFlow() {
+  const { flowScopeMigration, reservation } = await chrome.storage.local.get([
+    "flowScopeMigration", "reservation"
+  ]);
+  if (flowScopeMigration === FLOW_SCOPE_MIGRATION) return;
+  await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"]);
+  const updates = {
+    flowScopeMigration: FLOW_SCOPE_MIGRATION,
+    flowStatus: "安全更新已停止舊任務；請從插件重新開始找位",
+    flowStatusKind: "ok"
+  };
+  if (reservation) updates.reservation = { ...reservation, enabled: false };
+  await chrome.storage.local.set(updates);
+}
+
+const flowScopeMigrationReady = migrateUnsafeGlobalFlow();
 
 function utf8ToBase64(value) {
   const bytes = new TextEncoder().encode(value);
@@ -43,6 +61,13 @@ async function resolveRestaurantName(query) {
   return { name: match.name, bookingUrl: normalized.value };
 }
 
+async function openScopedReservationTab(url) {
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (!Number.isInteger(tab?.id)) throw new Error("無法識別這次開啟的訂位分頁。");
+  await chrome.storage.local.set({ activeReservationTabId: tab.id });
+  return tab;
+}
+
 async function openReservation(reservation) {
   const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
   if (normalized.kind === "invalid-url" || normalized.kind === "empty") {
@@ -54,7 +79,7 @@ async function openReservation(reservation) {
       const resolved = await resolveRestaurantName(reservation.restaurantQuery);
       if (resolved) {
         const booking = buildBookingUrl({ ...reservation, restaurantQuery: resolved.bookingUrl });
-        await chrome.tabs.create({ url: booking.url, active: true });
+        await openScopedReservationTab(booking.url);
         await chrome.action.setBadgeBackgroundColor({ color: "#16803c" });
         await chrome.action.setBadgeText({ text: "GO" });
         await chrome.storage.local.set({
@@ -77,11 +102,11 @@ async function openReservation(reservation) {
       lastOpenedAt: Date.now(),
       flowStatus: `正在搜尋：${reservation.restaurantQuery}`
     });
-    await chrome.tabs.create({ url: "https://dining.inline.app/zh-tw/", active: true });
+    await openScopedReservationTab("https://dining.inline.app/zh-tw/");
     return { mode: "search" };
   }
   const booking = buildBookingUrl(reservation);
-  await chrome.tabs.create({ url: booking.url, active: true });
+  await openScopedReservationTab(booking.url);
   await chrome.action.setBadgeBackgroundColor({ color: "#16803c" });
   await chrome.action.setBadgeText({ text: "GO" });
 
@@ -123,6 +148,7 @@ async function restoreAlarm() {
 chrome.runtime.onStartup.addListener(restoreAlarm);
 chrome.runtime.onInstalled.addListener(restoreAlarm);
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  await flowScopeMigrationReady;
   const { reservation } = await chrome.storage.local.get("reservation");
   if (!reservation?.enabled) return;
 
@@ -142,22 +168,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "CHECK_FLOW_SCOPE") {
+    flowScopeMigrationReady.then(() => chrome.storage.local.get("activeReservationTabId")).then(({ activeReservationTabId }) => {
+      sendResponse({ active: Number.isInteger(_sender.tab?.id) && _sender.tab.id === activeReservationTabId });
+    });
+    return true;
+  }
+
   if (message.type === "FLOW_STATUS") {
-    const status = String(message.status || "").slice(0, 8);
-    chrome.action.setBadgeBackgroundColor({
-      color: message.kind === "error" ? "#a22b26" : "#226c36"
+    chrome.storage.local.get("activeReservationTabId").then(async ({ activeReservationTabId }) => {
+      if (!Number.isInteger(_sender.tab?.id) || _sender.tab.id !== activeReservationTabId) {
+        sendResponse({ ok: false, ignored: true });
+        return;
+      }
+      const status = String(message.status || "").slice(0, 8);
+      await chrome.action.setBadgeBackgroundColor({
+        color: message.kind === "error" ? "#a22b26" : "#226c36"
+      });
+      await chrome.action.setBadgeText({ text: status });
+      await chrome.storage.local.set({
+        flowStatus: message.detail || message.status,
+        flowStatusKind: message.kind || "ok"
+      });
+      sendResponse({ ok: true });
     });
-    chrome.action.setBadgeText({ text: status });
-    chrome.storage.local.set({
-      flowStatus: message.detail || message.status,
-      flowStatusKind: message.kind || "ok"
-    });
-    sendResponse({ ok: true });
-    return false;
+    return true;
   }
 
   if (message.type === "OPEN_NOW") {
-    openReservation(message.reservation)
+    flowScopeMigrationReady.then(() => openReservation(message.reservation))
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: `背景開啟失敗：${error.message}` }));
     return true;
@@ -180,7 +219,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "CANCEL") {
     Promise.all([
       chrome.alarms.clear(ALARM_NAME),
-      chrome.alarms.clear(PREP_ALARM_NAME)
+      chrome.alarms.clear(PREP_ALARM_NAME),
+      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"])
     ]).then(() => sendResponse({ ok: true }));
     return true;
   }

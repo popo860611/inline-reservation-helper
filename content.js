@@ -209,9 +209,10 @@
     if (busy) return;
     busy = true;
     try {
+      const scope = await chrome.runtime.sendMessage({ type: "CHECK_FLOW_SCOPE" });
+      if (!scope?.active) return;
       const { reservation } = await chrome.storage.local.get("reservation");
-      const helperUrl = new URLSearchParams(location.search).has("inline_helper");
-      if (!reservation?.enabled && !helperUrl) return;
+      if (!reservation?.enabled) return;
 
       if (isSuccessPage()) {
         await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "訂位完成" });
@@ -270,6 +271,7 @@
             report("下一天", `${current} 沒有區間內時段，接著檢查 ${following}`);
             setTimeout(() => navigateToDate(reservation, following), 800);
           } else {
+            await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
             report("沒有空位", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有找到 ${reservation.timeStart}–${reservation.timeEnd}`, "error");
           }
           return;
@@ -347,5 +349,8 @@
     observer.timer = setTimeout(advance, 250);
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && (changes.activeReservationTabId || changes.reservation)) advance();
+  });
   advance();
 })();
