@@ -23,5 +23,11 @@ const popup = fs.readFileSync(path.join(root, "popup.js"), "utf8");
 assert.ok(popup.includes(`const BUILD_VERSION = "${manifest.version}"`));
 assert.deepEqual(manifest.content_scripts[0].js, ["common.js", "content.js"]);
 assert.deepEqual(manifest.content_scripts[1].js, ["common.js", "search.js"]);
+const popupHtml = fs.readFileSync(path.join(root, "popup.html"), "utf8");
+assert.match(popupHtml, /id="open-now"[^>]+type="button"[^>]+formnovalidate/);
+assert.match(popupHtml, /id="schedule"[^>]+type="button"[^>]+formnovalidate/);
+assert.doesNotMatch(popup, /form\.addEventListener\("submit"/);
+assert.match(popup, /#schedule[\s\S]+save\(reservation, true\)/);
+assert.match(popup, /#open-now[\s\S]+save\(reservation\);/);
 
 console.log("All inline reservation helper tests passed.");

@@ -15,12 +15,11 @@ const fields = {
   autoSubmit: document.querySelector("#auto-submit")
 };
 
-const form = document.querySelector("#reservation-form");
 const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.1";
+const BUILD_VERSION = "0.3.2";
 let pendingUpdateAction = null;
 
 function localDate(offset = 0) {
@@ -172,8 +171,7 @@ async function restore() {
   else setStatus("填妥三個區塊後，即可開始找位。");
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+document.querySelector("#schedule").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
     await save(reservation, true);
@@ -191,7 +189,7 @@ document.querySelector("#open-now").addEventListener("click", async () => {
     await save(reservation);
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
-    setStatus(response.mode === "url" ? "已開始尋找可用時段。" : "已開啟 inline 官方搜尋；若有多家分店，請選擇一次。", "ok");
+    setStatus(response.mode === "url" ? "已忽略排程時間，立即開始尋找可用時段。" : "已忽略排程時間並開啟 inline 官方搜尋；若有多家分店，請選擇一次。", "ok");
   } catch (error) { setStatus(error.message, "error"); }
 });
 

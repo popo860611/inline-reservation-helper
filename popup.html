@@ -18,7 +18,7 @@
         <span class="update-dot" aria-hidden="true"></span>
         <span class="update-copy"><strong>版本更新</strong><span id="update-mode">正在檢查版本…</span></span>
         <button id="apply-update" class="update-button" type="button" hidden>更新</button>
-        <span id="extension-version" class="version-pill">v0.3.1</span>
+        <span id="extension-version" class="version-pill">v0.3.2</span>
       </section>
 
       <form id="reservation-form">
@@ -70,19 +70,20 @@
         </section>
 
         <details>
-          <summary>排程與進階選項</summary>
+          <summary>排程與進階選項（立即找位不使用）</summary>
           <div class="details-body">
             <div class="grid">
-              <label>啟動時間<input id="release-at" type="datetime-local" /></label>
+              <label>排程啟動時間<input id="release-at" type="datetime-local" aria-describedby="schedule-help" /></label>
               <label>提前暖機<input id="prep-minutes" type="number" min="0" max="30" value="5" /></label>
             </div>
+            <p id="schedule-help" class="helper">只有按「設定排程」才會檢查這裡；按「現在開始找位」會完全忽略排程時間。</p>
             <label class="check-row"><input id="auto-submit" type="checkbox" checked />無付款／OTP 時自動送出</label>
           </div>
         </details>
 
         <div class="actions">
-          <button id="open-now" class="primary" type="button">現在開始找位</button>
-          <button type="submit">設定排程</button>
+          <button id="open-now" class="primary" type="button" formnovalidate>現在開始找位</button>
+          <button id="schedule" type="button" formnovalidate>設定排程</button>
         </div>
         <button id="cancel" class="quiet" type="button">取消排程</button>
       </form>
