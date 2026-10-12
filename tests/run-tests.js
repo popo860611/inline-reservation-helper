@@ -57,8 +57,8 @@ assert.match(popup, /window\.addEventListener\("pageshow", renderInitialUpdateSt
 assert.match(popup, /document\.visibilityState === "visible"/);
 assert.match(popup, /!event\.isTrusted/);
 assert.match(popup, /manualCheckReadyAt = performance\.now\(\) \+ 500/);
-assert.match(popupHtml, /id="live-mode" type="checkbox" hidden/);
-assert.match(popupHtml, /id="mode-toggle"[^>]*>預演｜不送出<\/button>/);
+assert.match(popupHtml, /class="header-row"[\s\S]+id="live-mode" type="checkbox" hidden[\s\S]+id="mode-toggle"[^>]*>預演｜不送出<\/button>/);
+assert.doesNotMatch(popupHtml, /class="run-mode"/);
 assert.doesNotMatch(popupHtml, /id="auto-submit"/);
 assert.match(popup, /value\.autoSubmit = liveMode\.checked/);
 assert.match(popup, /liveMode\.checked = false/);

@@ -9,8 +9,14 @@
   <body>
     <main>
       <header>
-        <p class="eyebrow">RESERVATION HELPER</p>
-        <h1>inline 訂位快手</h1>
+        <div class="header-row">
+          <div>
+            <p class="eyebrow">RESERVATION HELPER</p>
+            <h1>inline 訂位快手</h1>
+          </div>
+          <input id="live-mode" type="checkbox" hidden />
+          <button id="mode-toggle" class="mode-badge" type="button" title="點擊切換執行模式">預演｜不送出</button>
+        </div>
         <p class="lead">輸入餐廳與可接受區間，其餘交給訂位助手。</p>
       </header>
 
@@ -24,7 +30,7 @@
         <span class="update-dot" aria-hidden="true"></span>
         <span class="update-copy"><strong>GitHub 版本（手動）</strong><span id="update-mode">尚未手動檢查</span></span>
         <button id="apply-update" class="update-button" type="button">檢查更新</button>
-        <span id="extension-version" class="version-pill">v0.3.9</span>
+        <span id="extension-version" class="version-pill">v0.3.10</span>
       </section>
 
       <form id="reservation-form">
@@ -83,12 +89,6 @@
               <label>提前暖機<input id="prep-minutes" type="number" min="0" max="30" value="5" /></label>
             </div>
             <p id="schedule-help" class="helper">只有按「設定排程」才會檢查這裡；按「現在開始找位」會完全忽略排程時間。</p>
-            <div class="run-mode" aria-describedby="run-mode-help">
-              <span>執行模式</span>
-              <input id="live-mode" type="checkbox" hidden />
-              <button id="mode-toggle" class="mode-badge" type="button">預演｜不送出</button>
-            </div>
-            <p id="run-mode-help" class="helper">預演會找位並填資料，但絕不按最後送出；按模式按鈕才會切換成實際模式。</p>
           </div>
         </details>
 
