@@ -9,6 +9,7 @@ const fields = {
   contactName: document.querySelector("#contact-name"),
   contactPhone: document.querySelector("#contact-phone"),
   contactEmail: document.querySelector("#contact-email"),
+  diningPurpose: document.querySelector("#dining-purpose"),
   releaseAt: document.querySelector("#release-at"),
   prepMinutes: document.querySelector("#prep-minutes"),
   autoSubmit: document.querySelector("#auto-submit")
@@ -19,7 +20,7 @@ const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.0";
+const BUILD_VERSION = "0.3.1";
 let pendingUpdateAction = null;
 
 function localDate(offset = 0) {
@@ -101,6 +102,8 @@ updateButton.addEventListener("click", async () => {
 function setStatus(message, kind = "") {
   statusBox.textContent = message;
   statusBox.className = kind;
+  statusBox.setAttribute("role", kind === "error" ? "alert" : "status");
+  if (kind === "error") statusBox.focus({ preventScroll: false });
 }
 
 function readReservation() {
@@ -118,17 +121,16 @@ function readReservation() {
 }
 
 function isInlineUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && (url.hostname === "inline.app" || url.hostname.endsWith(".inline.app")) && url.pathname.startsWith("/booking/");
-  } catch { return false; }
+  return InlineHelperCommon.normalizeRestaurantInput(value).kind === "url";
 }
 
 function validate(reservation, scheduling = false) {
   if (!reservation.restaurantQuery) throw new Error("請輸入餐廳名稱或 inline 訂位網址。");
-  if (/^https?:/i.test(reservation.restaurantQuery) && !isInlineUrl(reservation.restaurantQuery)) {
+  const restaurant = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
+  if (restaurant.kind === "invalid-url") {
     throw new Error("網址必須是 https://inline.app/booking/... 官方訂位頁。");
   }
+  reservation.restaurantQuery = restaurant.value;
   if (!reservation.dateStart || !reservation.dateEnd || reservation.dateStart > reservation.dateEnd) {
     throw new Error("請確認日期區間，結束日期不可早於開始日期。");
   }
@@ -189,7 +191,7 @@ document.querySelector("#open-now").addEventListener("click", async () => {
     await save(reservation);
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
-    setStatus(isInlineUrl(reservation.restaurantQuery) ? "已開始尋找可用時段。" : "已開啟官方搜尋；若有多家分店，請選擇一次。", "ok");
+    setStatus(response.mode === "url" ? "已開始尋找可用時段。" : "已開啟 inline 官方搜尋；若有多家分店，請選擇一次。", "ok");
   } catch (error) { setStatus(error.message, "error"); }
 });
 

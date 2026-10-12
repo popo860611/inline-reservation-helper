@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "inline 訂位快手",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "依餐廳、日期區間、時間區間與人數，自動尋找 inline 可用訂位。",
   "permissions": ["alarms", "storage"],
   "host_permissions": ["https://api.github.com/*"],
@@ -13,12 +13,12 @@
       "matches": [
         "https://inline.app/booking/*"
       ],
-      "js": ["content.js"],
+      "js": ["common.js", "content.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://dining.inline.app/*"],
-      "js": ["search.js"],
+      "js": ["common.js", "search.js"],
       "run_at": "document_idle"
     }
   ],

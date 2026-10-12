@@ -18,7 +18,7 @@
         <span class="update-dot" aria-hidden="true"></span>
         <span class="update-copy"><strong>版本更新</strong><span id="update-mode">正在檢查版本…</span></span>
         <button id="apply-update" class="update-button" type="button" hidden>更新</button>
-        <span id="extension-version" class="version-pill">v0.3.0</span>
+        <span id="extension-version" class="version-pill">v0.3.1</span>
       </section>
 
       <form id="reservation-form">
@@ -26,9 +26,9 @@
           <p class="section-label"><span>1</span> 想訂哪裡</p>
           <label>
             餐廳名稱或 inline 訂位網址
-            <input id="restaurant-query" autocomplete="off" placeholder="例如：辛殿信義店，或貼上 inline 網址" required />
+            <input id="restaurant-query" autocomplete="off" placeholder="例如：辛殿信義店，或貼上 inline 網址" aria-describedby="restaurant-help" required />
           </label>
-          <p class="helper">輸入名稱會開啟 inline 官方搜尋；同名分店需選一次。</p>
+          <p id="restaurant-help" class="helper">可直接貼完整網址、Markdown 連結或 inline.app/booking/...；輸入名稱時，同名分店仍需確認一次。</p>
         </section>
 
         <section class="form-section">
@@ -55,6 +55,18 @@
             <input id="contact-phone" type="tel" autocomplete="tel" placeholder="手機號碼" required />
             <input id="contact-email" type="email" autocomplete="email" placeholder="Email（頁面要求時填入）" />
           </fieldset>
+          <label>
+            用餐目的偏好
+            <select id="dining-purpose">
+              <option>朋友聚餐</option>
+              <option>家庭用餐</option>
+              <option>慶生</option>
+              <option>約會</option>
+              <option>週年慶</option>
+              <option>商務聚餐</option>
+            </select>
+          </label>
+          <p class="helper">桌型／餐區會優先選第一個可用選項；若餐廳有其他未知必填題，助手會停下並指出題目。</p>
         </section>
 
         <details>
@@ -75,9 +87,10 @@
         <button id="cancel" class="quiet" type="button">取消排程</button>
       </form>
 
-      <section id="status" aria-live="polite" aria-atomic="true"></section>
+      <section id="status" role="status" tabindex="-1" aria-live="polite" aria-atomic="true"></section>
       <p class="footnote">CAPTCHA 需手動；付款、信用卡與 OTP 會停下讓你確認。</p>
     </main>
+    <script src="common.js"></script>
     <script src="update-config.js"></script>
     <script src="popup.js"></script>
   </body>

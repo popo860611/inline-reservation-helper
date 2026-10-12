@@ -148,7 +148,8 @@ legend { padding: 0 5px; color: #526057; font-size: 11px; font-weight: 750; }
 .check-row { display: grid; grid-template-columns: 18px 1fr; align-items: center; gap: 8px; }
 .check-row input { width: 16px; height: 16px; padding: 0; }
 
-input {
+input,
+select {
   width: 100%;
   border: 1px solid #ccd5cc;
   border-radius: 10px;
@@ -159,7 +160,8 @@ input {
   outline: none;
 }
 
-input:focus { border-color: #2f7d43; box-shadow: 0 0 0 3px rgba(47, 125, 67, 0.12); }
+input:focus,
+select:focus { border-color: #2f7d43; box-shadow: 0 0 0 3px rgba(47, 125, 67, 0.12); }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .actions { display: grid; grid-template-columns: 1.2fr 1fr; gap: 8px; margin-top: 3px; }
 
@@ -175,6 +177,7 @@ button {
 }
 
 button:hover { filter: brightness(0.98); }
+button:focus-visible { outline: 3px solid rgba(47, 125, 67, 0.28); outline-offset: 2px; }
 button.primary { border-color: #226c36; background: #226c36; color: #fff; }
 button.quiet { border: 0; background: transparent; color: #69756c; padding: 5px; }
 

@@ -1,5 +1,6 @@
 const ALARM_NAME = "inline-reservation-open";
 const PREP_ALARM_NAME = "inline-reservation-prepare";
+importScripts("common.js");
 
 function utf8ToBase64(value) {
   const bytes = new TextEncoder().encode(value);
@@ -9,7 +10,9 @@ function utf8ToBase64(value) {
 }
 
 function buildBookingUrl(reservation) {
-  const url = new URL(reservation.restaurantQuery);
+  const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
+  if (normalized.kind !== "url") throw new Error("找不到有效的 inline 官方訂位網址，請重新貼上網址。");
+  const url = new URL(normalized.value);
   const selectedDate = reservation.dateStart;
   const prefilled = {
     language: reservation.language || "zh",
@@ -25,7 +28,12 @@ function buildBookingUrl(reservation) {
 }
 
 async function openReservation(reservation) {
-  if (!/^https:\/\//i.test(reservation.restaurantQuery)) {
+  const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
+  if (normalized.kind === "invalid-url" || normalized.kind === "empty") {
+    throw new Error("餐廳網址無效，請貼上 inline 官方訂位網址或輸入餐廳名稱。");
+  }
+  reservation.restaurantQuery = normalized.value;
+  if (normalized.kind === "name") {
     const searchUrl = new URL("https://dining.inline.app/zh-tw/");
     searchUrl.hash = `inline-helper-search=${encodeURIComponent(reservation.restaurantQuery)}`;
     await chrome.tabs.create({ url: searchUrl.toString(), active: true });
@@ -33,7 +41,7 @@ async function openReservation(reservation) {
       lastOpenedAt: Date.now(),
       flowStatus: `正在搜尋：${reservation.restaurantQuery}`
     });
-    return;
+    return { mode: "search" };
   }
   const booking = buildBookingUrl(reservation);
   await chrome.tabs.create({ url: booking.url, active: true });
@@ -45,11 +53,13 @@ async function openReservation(reservation) {
     lastOpenedUrl: booking.url,
     lastSelectedDate: booking.selectedDate
   });
+  return { mode: "url" };
 }
 
 async function prepareReservation(reservation) {
-  if (!/^https:\/\//i.test(reservation.restaurantQuery)) return;
-  const url = new URL(reservation.restaurantQuery);
+  const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
+  if (normalized.kind !== "url") return;
+  const url = new URL(normalized.value);
   url.searchParams.set("language", "zh-tw");
   await chrome.tabs.create({ url: url.toString(), active: true });
   await chrome.action.setBadgeBackgroundColor({ color: "#aa6f00" });
@@ -87,9 +97,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
   if (alarm.name !== ALARM_NAME) return;
   await openReservation(reservation);
-  await chrome.storage.local.set({
-    reservation: { ...reservation, enabled: false }
-  });
+  await chrome.storage.local.set({ scheduledTriggeredAt: Date.now() });
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -111,7 +119,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "OPEN_NOW") {
     openReservation(message.reservation)
-      .then(() => sendResponse({ ok: true }))
+      .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
