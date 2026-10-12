@@ -213,6 +213,7 @@
       if (!scope?.active) return;
       const { reservation } = await chrome.storage.local.get("reservation");
       if (!reservation?.enabled) return;
+      const helperUrl = new URLSearchParams(location.search).has("inline_helper");
 
       if (isSuccessPage()) {
         await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "訂位完成" });

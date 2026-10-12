@@ -93,6 +93,8 @@ assert.ok(content.indexOf("if (!reservation.autoSubmit)") < content.indexOf("fin
 assert.match(content, /if \(!scope\?\.active\) return/);
 assert.match(content, /if \(!reservation\?\.enabled\) return/);
 assert.doesNotMatch(content, /!reservation\?\.enabled && !helperUrl/);
+assert.match(content, /const helperUrl = new URLSearchParams\(location\.search\)\.has\("inline_helper"\)/);
+assert.ok(content.indexOf("const helperUrl =") < content.indexOf("if (!helperUrl"));
 assert.match(content, /changes\.activeReservationTabId \|\| changes\.reservation/);
 assert.match(content, /report\("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位"\)/);
 assert.match(content, /previewCompletedAt: Date\.now\(\)/);
