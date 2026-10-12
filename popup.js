@@ -19,7 +19,10 @@ const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.7";
+const reloadCard = document.querySelector("#reload-card");
+const backgroundVersionDetail = document.querySelector("#background-version-detail");
+const reloadExtensionButton = document.querySelector("#reload-extension");
+const BUILD_VERSION = "0.3.8";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -48,6 +51,19 @@ function renderInitialUpdateStatus() {
   updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未手動檢查`;
 }
 
+async function checkBackgroundVersion() {
+  let backgroundVersion = "未啟動";
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "PING_BACKGROUND" });
+    if (response?.ok && response.version) backgroundVersion = response.version;
+  } catch (_error) {}
+
+  const ready = backgroundVersion === BUILD_VERSION;
+  reloadCard.hidden = ready;
+  backgroundVersionDetail.textContent = `畫面版本 ${BUILD_VERSION}｜背景版本 ${backgroundVersion}`;
+  return ready;
+}
+
 async function checkForUpdates() {
   const repository = String(globalThis.UPDATE_CONFIG?.githubRepository || "").trim();
   updateButton.disabled = true;
@@ -71,12 +87,16 @@ async function checkForUpdates() {
     const release = await response.json();
     const latestVersion = String(release.tag_name || "").replace(/^v/i, "");
     if (latestVersion && compareVersions(latestVersion, BUILD_VERSION) > 0) {
-      updateMode.textContent = `發現新版 v${latestVersion}｜按更新取得`;
+      const zipAsset = Array.isArray(release.assets)
+        ? release.assets.find((asset) => asset?.name === "inline-reservation-helper.zip")
+        : null;
+      const updateUrl = zipAsset?.browser_download_url || release.html_url;
+      updateMode.textContent = `發現新版 v${latestVersion}｜由你手動下載`;
       updateCard.classList.add("available");
-      updateButton.textContent = "前往更新";
-      pendingUpdateAction = { type: "release", url: release.html_url };
+      updateButton.textContent = `下載 v${latestVersion}`;
+      pendingUpdateAction = { type: "release", url: updateUrl };
     } else if (latestVersion && compareVersions(latestVersion, BUILD_VERSION) < 0) {
-      updateMode.textContent = `檢查完成 ${checkedAt()}｜GitHub v${latestVersion}，本機較新`;
+      updateMode.textContent = `檢查完成 ${checkedAt()}｜尚無比 v${BUILD_VERSION} 更新的公開版本`;
       updateButton.textContent = "再次檢查";
       pendingUpdateAction = { type: "check" };
     } else {
@@ -106,10 +126,16 @@ updateButton.addEventListener("click", async (event) => {
   if (!event.isTrusted || performance.now() < manualCheckReadyAt) return;
   if (pendingUpdateAction?.type === "release" && pendingUpdateAction.url) {
     await chrome.tabs.create({ url: pendingUpdateAction.url, active: true });
-    setStatus("已開啟新版下載頁。下載並覆蓋原資料夾後，再回到擴充功能按重新載入。", "ok");
+    setStatus("已開始取得新版。解壓縮並覆蓋原資料夾後，到擴充功能頁按「重新載入」。", "ok");
     return;
   }
   await checkForUpdates();
+});
+
+reloadExtensionButton.addEventListener("click", () => {
+  reloadExtensionButton.disabled = true;
+  reloadExtensionButton.textContent = "正在套用…";
+  chrome.runtime.reload();
 });
 
 window.addEventListener("pageshow", renderInitialUpdateStatus);
@@ -219,4 +245,4 @@ document.querySelector("#cancel").addEventListener("click", async () => {
   setStatus("排程已取消。");
 });
 
-Promise.all([restore(), renderInitialUpdateStatus()]).catch((error) => setStatus(error.message, "error"));
+Promise.all([restore(), renderInitialUpdateStatus(), checkBackgroundVersion()]).catch((error) => setStatus(error.message, "error"));

@@ -14,11 +14,17 @@
         <p class="lead">輸入餐廳與可接受區間，其餘交給訂位助手。</p>
       </header>
 
+      <section id="reload-card" class="reload-card" role="alert" hidden>
+        <strong>新版檔案尚未套用</strong>
+        <p id="background-version-detail">請手動套用後再使用訂位功能。</p>
+        <button id="reload-extension" type="button">套用插件更新</button>
+      </section>
+
       <section class="update-card" role="status" aria-live="polite" aria-atomic="true">
         <span class="update-dot" aria-hidden="true"></span>
-        <span class="update-copy"><strong>版本更新（手動）</strong><span id="update-mode">尚未手動檢查</span></span>
+        <span class="update-copy"><strong>GitHub 版本（手動）</strong><span id="update-mode">尚未手動檢查</span></span>
         <button id="apply-update" class="update-button" type="button">檢查更新</button>
-        <span id="extension-version" class="version-pill">v0.3.7</span>
+        <span id="extension-version" class="version-pill">v0.3.8</span>
       </section>
 
       <form id="reservation-form">

@@ -137,6 +137,11 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "PING_BACKGROUND") {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
+
   if (message.type === "FLOW_STATUS") {
     const status = String(message.status || "").slice(0, 8);
     chrome.action.setBadgeBackgroundColor({
