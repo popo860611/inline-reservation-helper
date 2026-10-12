@@ -307,16 +307,24 @@
         report("缺必填", `請手動完成「${missing.label}」，完成後助手會繼續`, "error");
         return;
       }
-      if (!reservation.autoSubmit) {
-        report("待確認", "已完成自動填寫，等待你送出");
-        return;
-      }
       if (!reservation.contactName || !reservation.contactPhone) {
         report("缺資料", "請先在插件填入姓名與手機", "error");
         return;
       }
 
       const finalButton = exactButton("確認預訂", "確認訂位", "送出訂位", "完成訂位", "送出預訂");
+      if (!reservation.autoSubmit) {
+        if (!finalButton) {
+          report("預演處理中", "資料已填妥，正在等待 inline 顯示最終確認步驟");
+          return;
+        }
+        await chrome.storage.local.set({
+          reservation: { ...reservation, enabled: false },
+          previewCompletedAt: Date.now()
+        });
+        report("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位");
+        return;
+      }
       if (finalButton) {
         if (state.submitAttemptedAt) {
           report("請確認", "已送出一次，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");

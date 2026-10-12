@@ -63,19 +63,24 @@ assert.doesNotMatch(popupHtml, /id="auto-submit"/);
 assert.match(popup, /value\.autoSubmit = liveMode\.checked/);
 assert.match(popup, /liveMode\.checked = false/);
 assert.match(popup, /modeToggle\.addEventListener\("click"/);
+assert.match(popup, /flowStatusKind === "error"/);
+assert.match(popup, /flowStatusKind === "ok"/);
 assert.match(popup, /asset\?\.name === "inline-reservation-helper\.zip"/);
 assert.match(popup, /updateButton\.textContent = `下載 v\$\{latestVersion\}`/);
 
 const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
 assert.match(background, /message\.type === "PING_BACKGROUND"/);
 assert.match(background, /chrome\.runtime\.getManifest\(\)\.version/);
+assert.match(background, /flowStatusKind: message\.kind \|\| "ok"/);
 assert.match(background, /pendingRestaurantSearch/);
 assert.match(background, /diner-network-api\.inline\.app\/diner-network\/search/);
 assert.doesNotMatch(background, /new URL\(/);
 const content = fs.readFileSync(path.join(root, "content.js"), "utf8");
 assert.doesNotMatch(content, /new URL\(/);
 assert.ok(content.indexOf("if (!reservation.autoSubmit)") < content.indexOf("finalButton.click()"));
-assert.match(content, /已完成自動填寫，等待你送出/);
+assert.match(content, /report\("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位"\)/);
+assert.match(content, /previewCompletedAt: Date\.now\(\)/);
+assert.match(content, /reservation: \{ \.\.\.reservation, enabled: false \}/);
 assert.match(background, /chrome\.tabs\.create\(\{ url: "https:\/\/dining\.inline\.app\/zh-tw\/"/);
 assert.doesNotMatch(background, /inline-helper-search=/);
 

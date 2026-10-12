@@ -148,7 +148,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       color: message.kind === "error" ? "#a22b26" : "#226c36"
     });
     chrome.action.setBadgeText({ text: status });
-    chrome.storage.local.set({ flowStatus: message.detail || message.status });
+    chrome.storage.local.set({
+      flowStatus: message.detail || message.status,
+      flowStatusKind: message.kind || "ok"
+    });
     sendResponse({ ok: true });
     return false;
   }

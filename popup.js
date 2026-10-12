@@ -23,7 +23,7 @@ const backgroundVersionDetail = document.querySelector("#background-version-deta
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.10";
+const BUILD_VERSION = "0.3.11";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -215,8 +215,8 @@ async function save(reservation, scheduling = false) {
 }
 
 async function restore() {
-  const { reservation, lastOpenedAt, flowStatus, lastSelectedDate } = await chrome.storage.local.get([
-    "reservation", "lastOpenedAt", "flowStatus", "lastSelectedDate"
+  const { reservation, lastOpenedAt, flowStatus, flowStatusKind, lastSelectedDate } = await chrome.storage.local.get([
+    "reservation", "lastOpenedAt", "flowStatus", "flowStatusKind", "lastSelectedDate"
   ]);
   fields.dateStart.value ||= localDate(1);
   fields.dateEnd.value ||= localDate(7);
@@ -229,7 +229,10 @@ async function restore() {
     }
   }
   const alarm = await chrome.alarms.get("inline-reservation-open");
-  if (flowStatus) setStatus(`${flowStatus}${lastSelectedDate ? `；目前日期 ${lastSelectedDate}` : ""}`);
+  if (flowStatus) setStatus(
+    `${flowStatus}${lastSelectedDate ? `；目前日期 ${lastSelectedDate}` : ""}`,
+    flowStatusKind === "error" ? "error" : flowStatusKind === "ok" ? "ok" : ""
+  );
   else if (alarm) setStatus(`已排程：${new Date(alarm.scheduledTime).toLocaleString("zh-TW")}`, "ok");
   else if (lastOpenedAt) setStatus(`上次啟動：${new Date(lastOpenedAt).toLocaleString("zh-TW")}`);
   else setStatus("填妥三個區塊後，即可開始找位。");
