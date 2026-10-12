@@ -253,19 +253,16 @@
     return false;
   }
 
-  function checkRequiredAgreements() {
-    let changed = false;
-    for (const checkbox of document.querySelectorAll('input[type="checkbox"][required]')) {
-      if (!visible(checkbox) || checkbox.checked) continue;
-      checkbox.click();
-      changed = true;
-    }
-    for (const control of document.querySelectorAll('[role="checkbox"][aria-required="true"]')) {
-      if (!visible(control) || control.getAttribute("aria-checked") === "true") continue;
-      control.click();
-      changed = true;
-    }
-    return changed;
+  function findManualConsentControl() {
+    return [...document.querySelectorAll('button, [role="button"], label')].find((element) =>
+      visible(element) && /我已閱讀並同意|同意.*規則|同意.*注意事項|接受.*條款/.test((element.textContent || "").trim())
+    ) || null;
+  }
+
+  function findPaymentAuthorizationButton() {
+    return [...document.querySelectorAll("button")].find((button) =>
+      visible(button) && /授權信用卡|信用卡.*確認訂位|支付訂金|前往付款|付款.*確認|預授權/.test((button.textContent || "").trim())
+    ) || null;
   }
 
   function unansweredRequired() {
@@ -315,6 +312,18 @@
       hideCaptchaNotice();
       if (hasInteractivePaymentStep()) {
         report("需付款", "已進入信用卡、訂金或驗證頁，請由你手動完成", "error");
+        return;
+      }
+      const paymentAuthorizationButton = findPaymentAuthorizationButton();
+      if (paymentAuthorizationButton) {
+        markNeedsAttention({ element: paymentAuthorizationButton, label: "信用卡授權與確認訂位" });
+        report("需你授權", "已停在信用卡授權／確認訂位按鈕前；請由你本人確認條款、金額與取消規則後手動操作", "error");
+        return;
+      }
+      const manualConsentControl = findManualConsentControl();
+      if (manualConsentControl) {
+        markNeedsAttention({ element: manualConsentControl, label: "規則與注意事項" });
+        report("需你同意", "請閱讀規則與注意事項，並由你本人手動同意；插件不會代替接受條款", "error");
         return;
       }
       if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
@@ -377,13 +386,6 @@
       }
 
       if (adultPicker && selectedTimeIsValid) {
-        const paymentButton = [...document.querySelectorAll("button")].find((button) =>
-          visible(button) && /授權信用卡|支付訂金|前往付款|付款.*確認/.test((button.textContent || "").trim())
-        );
-        if (paymentButton) {
-          report("需預授權", "此時段需要訂金或信用卡預授權，已停在送出前讓你手動確認", "error");
-          return;
-        }
         const bookingButton = exactButton("完成預訂", "填寫訂位資料", "下一步");
         if (bookingButton) {
           report("下一步", "正在進入訂位資料頁");
@@ -398,7 +400,6 @@
         fillInput(['#name', 'input[autocomplete="name"]'], reservation.contactName) || fillByHint(/姓名|訂位人|name/i, reservation.contactName)
       ];
       if (chooseDiningPurpose(reservation)) return;
-      if (checkRequiredAgreements()) return;
       if (changed.some(Boolean)) report("已填寫", "聯絡資料已填入本頁");
 
       const missing = unansweredRequired();
