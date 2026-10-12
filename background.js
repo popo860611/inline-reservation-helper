@@ -27,6 +27,21 @@ function buildBookingUrl(reservation) {
   return { url: url.toString(), selectedDate };
 }
 
+async function resolveRestaurantName(query) {
+  const endpoint = `https://diner-network-api.inline.app/diner-network/search?query=${encodeURIComponent(query)}&limit=10&language=zh-tw`;
+  const response = await fetch(endpoint, {
+    cache: "no-store",
+    headers: { Accept: "application/json" }
+  });
+  if (!response.ok) throw new Error(`inline 搜尋服務回應 ${response.status}`);
+  const payload = await response.json();
+  const match = InlineHelperCommon.selectRestaurantMatch(payload.result, query);
+  if (!match) return null;
+  const normalized = InlineHelperCommon.normalizeRestaurantInput(match.bookingLink);
+  if (normalized.kind !== "url") return null;
+  return { name: match.name, bookingUrl: normalized.value };
+}
+
 async function openReservation(reservation) {
   const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
   if (normalized.kind === "invalid-url" || normalized.kind === "empty") {
@@ -34,13 +49,34 @@ async function openReservation(reservation) {
   }
   reservation.restaurantQuery = normalized.value;
   if (normalized.kind === "name") {
-    const searchUrl = new URL("https://dining.inline.app/zh-tw/");
-    searchUrl.hash = `inline-helper-search=${encodeURIComponent(reservation.restaurantQuery)}`;
-    await chrome.tabs.create({ url: searchUrl.toString(), active: true });
+    try {
+      const resolved = await resolveRestaurantName(reservation.restaurantQuery);
+      if (resolved) {
+        const booking = buildBookingUrl({ ...reservation, restaurantQuery: resolved.bookingUrl });
+        await chrome.tabs.create({ url: booking.url, active: true });
+        await chrome.action.setBadgeBackgroundColor({ color: "#16803c" });
+        await chrome.action.setBadgeText({ text: "GO" });
+        await chrome.storage.local.set({
+          lastOpenedAt: Date.now(),
+          lastOpenedUrl: booking.url,
+          lastSelectedDate: booking.selectedDate,
+          flowStatus: `已找到：${resolved.name}`
+        });
+        return { mode: "url", resolvedName: resolved.name };
+      }
+    } catch (error) {
+      await chrome.storage.local.set({ flowStatus: `官方名稱搜尋暫時失敗：${error.message}` });
+    }
+
     await chrome.storage.local.set({
+      pendingRestaurantSearch: {
+        query: reservation.restaurantQuery,
+        createdAt: Date.now()
+      },
       lastOpenedAt: Date.now(),
       flowStatus: `正在搜尋：${reservation.restaurantQuery}`
     });
+    await chrome.tabs.create({ url: "https://dining.inline.app/zh-tw/", active: true });
     return { mode: "search" };
   }
   const booking = buildBookingUrl(reservation);

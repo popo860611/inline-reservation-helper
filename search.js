@@ -1,7 +1,4 @@
 (() => {
-  const match = location.hash.match(/inline-helper-search=([^&]+)/);
-  if (!match) return;
-  const query = decodeURIComponent(match[1]);
   let suggestionClicked = false;
   let searchFilled = false;
 
@@ -11,6 +8,15 @@
 
   function normalize(value) {
     return String(value || "").toLowerCase().replace(/\s+/g, "").replace(/[｜|·・]/g, "");
+  }
+
+  function matchScore(candidate, expected) {
+    const left = normalize(candidate);
+    const right = normalize(expected);
+    if (!left || !right) return 0;
+    if (left.includes(right) || right.includes(left)) return 1;
+    const characters = [...new Set(right)];
+    return characters.filter((character) => left.includes(character)).length / characters.length;
   }
 
   function visible(element) {
@@ -28,7 +34,7 @@
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function fillSearch() {
+  function fillSearch(query) {
     if (searchFilled) return true;
     const input = [...document.querySelectorAll("input")].find((item) =>
       /搜尋|search|ask inline|問 inline/i.test(`${item.placeholder} ${item.getAttribute("aria-label") || ""}`)
@@ -41,7 +47,7 @@
     return true;
   }
 
-  function inspectResults() {
+  function inspectResults(query) {
     const bookingLinks = [...document.querySelectorAll('a[href*="inline.app/booking/"], a[href^="/booking/"]')]
       .filter(visible);
     const matchingLinks = bookingLinks.filter((link) => normalize(link.textContent).includes(normalize(query)));
@@ -53,13 +59,17 @@
 
     const restaurantSuggestions = [...document.querySelectorAll('[role="option"]')]
       .filter((option) => visible(option) && option.querySelector("img"));
-    const matchingSuggestions = restaurantSuggestions.filter((option) =>
-      normalize(option.textContent).includes(normalize(query)) ||
-      normalize(query).includes(normalize(option.querySelector("strong")?.textContent))
-    );
+    const scoredSuggestions = restaurantSuggestions
+      .map((option) => ({ option, score: matchScore(option.textContent, query) }))
+      .filter(({ score }) => score >= 0.72)
+      .sort((left, right) => right.score - left.score);
+    const matchingSuggestions = scoredSuggestions
+      .filter(({ score }) => score === scoredSuggestions[0]?.score)
+      .map(({ option }) => option);
     if (!suggestionClicked && matchingSuggestions.length === 1) {
       suggestionClicked = true;
       report("選分店", `找到「${(matchingSuggestions[0].textContent || "").trim()}」，正在開啟`);
+      chrome.storage.local.remove("pendingRestaurantSearch").catch(() => {});
       matchingSuggestions[0].click();
       return true;
     }
@@ -70,14 +80,29 @@
     return false;
   }
 
-  const observer = new MutationObserver(() => {
-    fillSearch();
-    inspectResults();
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  fillSearch();
-  inspectResults();
-  setTimeout(() => {
-    if (!inspectResults()) report("找不到", "官方搜尋沒有可開啟的訂位結果；請改貼餐廳的 inline 訂位網址", "error");
-  }, 3500);
+  async function start() {
+    const { pendingRestaurantSearch } = await chrome.storage.local.get("pendingRestaurantSearch");
+    const query = String(pendingRestaurantSearch?.query || "").trim();
+    const age = Date.now() - Number(pendingRestaurantSearch?.createdAt || 0);
+    if (!query || age < 0 || age > 120_000) {
+      if (pendingRestaurantSearch) await chrome.storage.local.remove("pendingRestaurantSearch");
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      fillSearch(query);
+      inspectResults(query);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    fillSearch(query);
+    inspectResults(query);
+    setTimeout(() => {
+      if (!inspectResults(query)) {
+        chrome.storage.local.remove("pendingRestaurantSearch").catch(() => {});
+        report("找不到", "官方搜尋沒有可開啟的訂位結果；請改貼餐廳的 inline 訂位網址", "error");
+      }
+    }, 5000);
+  }
+
+  start().catch((error) => report("搜尋失敗", `餐廳名稱搜尋失敗：${error.message}`, "error"));
 })();

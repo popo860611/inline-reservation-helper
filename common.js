@@ -40,6 +40,34 @@
       .trim();
   }
 
+  function normalizeRestaurantName(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/xin\s*dian|hotpot/gi, "")
+      .replace(/[\s｜|·・()（）\-_/]+/g, "")
+      .trim();
+  }
+
+  function restaurantMatchScore(candidate, expected) {
+    const left = normalizeRestaurantName(candidate);
+    const right = normalizeRestaurantName(expected);
+    if (!left || !right) return 0;
+    if (left.includes(right) || right.includes(left)) return 1;
+    const characters = [...new Set(right)];
+    return characters.filter((character) => left.includes(character)).length / characters.length;
+  }
+
+  function selectRestaurantMatch(results, query) {
+    const ranked = (Array.isArray(results) ? results : [])
+      .filter((result) => result && typeof result.bookingLink === "string")
+      .map((result) => ({ result, score: restaurantMatchScore(result.name, query) }))
+      .filter(({ score }) => score >= 0.72)
+      .sort((left, right) => right.score - left.score);
+    if (!ranked.length) return null;
+    if (ranked[1] && ranked[1].score === ranked[0].score) return null;
+    return ranked[0].result;
+  }
+
   function timeToMinutes(value) {
     const match = normalizeTime(value).match(/(\d{1,2}):(\d{2})/);
     if (!match) return null;
@@ -52,6 +80,8 @@
 
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
+    restaurantMatchScore,
+    selectRestaurantMatch,
     normalizeTime,
     timeToMinutes
   };

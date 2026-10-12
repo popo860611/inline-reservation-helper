@@ -19,7 +19,7 @@ const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.2";
+const BUILD_VERSION = "0.3.3";
 let pendingUpdateAction = null;
 
 function localDate(offset = 0) {
@@ -31,10 +31,17 @@ function localDate(offset = 0) {
   return `${year}-${month}-${day}`;
 }
 
-async function renderUpdateStatus() {
+function checkedAt() {
+  return new Date().toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+}
+
+async function renderInitialUpdateStatus() {
   document.querySelector("#extension-version").textContent = `v${BUILD_VERSION}`;
-  updateButton.hidden = true;
+  updateButton.hidden = false;
+  updateButton.disabled = false;
+  updateButton.textContent = "檢查更新";
   updateCard.classList.remove("available");
+  pendingUpdateAction = { type: "check" };
 
   let backgroundVersion = "";
   try {
@@ -45,14 +52,25 @@ async function renderUpdateStatus() {
   if (backgroundVersion && backgroundVersion !== BUILD_VERSION) {
     updateMode.textContent = `新版檔案已就緒｜背景仍是 v${backgroundVersion}`;
     updateCard.classList.add("available");
-    updateButton.hidden = false;
+    updateButton.textContent = "套用更新";
     pendingUpdateAction = { type: "reload" };
     return;
   }
 
+  updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未檢查`;
+}
+
+async function checkForUpdates() {
   const repository = String(globalThis.UPDATE_CONFIG?.githubRepository || "").trim();
+  updateButton.disabled = true;
+  updateButton.textContent = "檢查中…";
+  updateMode.textContent = `目前 v${BUILD_VERSION}｜正在檢查 GitHub`;
+  updateCard.classList.remove("available");
+
   if (!repository) {
-    updateMode.textContent = `目前 v${BUILD_VERSION}｜Git 開發版`;
+    updateMode.textContent = `目前 v${BUILD_VERSION}｜未設定更新來源`;
+    updateButton.textContent = "重新檢查";
+    updateButton.disabled = false;
     return;
   }
 
@@ -67,13 +85,23 @@ async function renderUpdateStatus() {
     if (latestVersion && compareVersions(latestVersion, BUILD_VERSION) > 0) {
       updateMode.textContent = `發現新版 v${latestVersion}｜按更新取得`;
       updateCard.classList.add("available");
-      updateButton.hidden = false;
+      updateButton.textContent = "前往更新";
       pendingUpdateAction = { type: "release", url: release.html_url };
+    } else if (latestVersion && compareVersions(latestVersion, BUILD_VERSION) < 0) {
+      updateMode.textContent = `檢查完成 ${checkedAt()}｜GitHub v${latestVersion}，本機較新`;
+      updateButton.textContent = "再次檢查";
+      pendingUpdateAction = { type: "check" };
     } else {
-      updateMode.textContent = `目前 v${BUILD_VERSION}｜已是最新版`;
+      updateMode.textContent = `檢查完成 ${checkedAt()}｜v${BUILD_VERSION} 已是最新版`;
+      updateButton.textContent = "再次檢查";
+      pendingUpdateAction = { type: "check" };
     }
   } catch (_error) {
-    updateMode.textContent = `目前 v${BUILD_VERSION}｜版本檢查失敗`;
+    updateMode.textContent = `檢查失敗 ${checkedAt()}｜請稍後重試`;
+    updateButton.textContent = "重新檢查";
+    pendingUpdateAction = { type: "check" };
+  } finally {
+    updateButton.disabled = false;
   }
 }
 
@@ -95,7 +123,9 @@ updateButton.addEventListener("click", async () => {
   if (pendingUpdateAction?.type === "release" && pendingUpdateAction.url) {
     await chrome.tabs.create({ url: pendingUpdateAction.url, active: true });
     setStatus("已開啟新版下載頁。下載並覆蓋原資料夾後，再回到擴充功能按重新載入。", "ok");
+    return;
   }
+  await checkForUpdates();
 });
 
 function setStatus(message, kind = "") {
@@ -200,4 +230,4 @@ document.querySelector("#cancel").addEventListener("click", async () => {
   setStatus("排程已取消。");
 });
 
-Promise.all([restore(), renderUpdateStatus()]).catch((error) => setStatus(error.message, "error"));
+Promise.all([restore(), renderInitialUpdateStatus()]).catch((error) => setStatus(error.message, "error"));

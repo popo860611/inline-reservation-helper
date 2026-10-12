@@ -32,7 +32,7 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
 
 .update-card {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   margin: -4px 0 16px;
@@ -61,11 +61,9 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
 .update-copy strong { font-size: 12px; }
 
 #update-mode {
-  overflow: hidden;
   color: #56705d;
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .version-pill {
@@ -79,6 +77,7 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
 }
 
 .update-button {
+  grid-column: 2 / 4;
   border-color: #2b7740;
   border-radius: 999px;
   background: #2b7740;
@@ -86,6 +85,11 @@ h1 { margin: 0; font-size: 25px; letter-spacing: -0.04em; }
   color: #fff;
   font-size: 10px;
   white-space: nowrap;
+}
+
+.update-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
 }
 
 .update-card.available .update-dot {
