@@ -51,6 +51,10 @@ assert.match(popupHtml, /id="apply-update"[^>]*>檢查更新<\/button>/);
 assert.doesNotMatch(popupHtml, /id="apply-update"[^>]*hidden/);
 assert.doesNotMatch(popup, /PING_BACKGROUND/);
 assert.doesNotMatch(popup, /chrome\.runtime\.reload/);
+assert.match(popup, /window\.addEventListener\("pageshow", renderInitialUpdateStatus\)/);
+assert.match(popup, /document\.visibilityState === "visible"/);
+assert.match(popup, /!event\.isTrusted/);
+assert.match(popup, /manualCheckReadyAt = performance\.now\(\) \+ 500/);
 
 const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
 assert.doesNotMatch(background, /PING_BACKGROUND/);

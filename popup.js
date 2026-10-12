@@ -19,8 +19,9 @@ const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.6";
+const BUILD_VERSION = "0.3.7";
 let pendingUpdateAction = null;
+let manualCheckReadyAt = 0;
 
 function localDate(offset = 0) {
   const date = new Date();
@@ -42,6 +43,7 @@ function renderInitialUpdateStatus() {
   updateButton.textContent = "檢查更新";
   updateCard.classList.remove("available");
   pendingUpdateAction = { type: "check" };
+  manualCheckReadyAt = performance.now() + 500;
 
   updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未手動檢查`;
 }
@@ -100,13 +102,19 @@ function compareVersions(left, right) {
   return 0;
 }
 
-updateButton.addEventListener("click", async () => {
+updateButton.addEventListener("click", async (event) => {
+  if (!event.isTrusted || performance.now() < manualCheckReadyAt) return;
   if (pendingUpdateAction?.type === "release" && pendingUpdateAction.url) {
     await chrome.tabs.create({ url: pendingUpdateAction.url, active: true });
     setStatus("已開啟新版下載頁。下載並覆蓋原資料夾後，再回到擴充功能按重新載入。", "ok");
     return;
   }
   await checkForUpdates();
+});
+
+window.addEventListener("pageshow", renderInitialUpdateStatus);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") renderInitialUpdateStatus();
 });
 
 function setStatus(message, kind = "") {
