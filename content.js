@@ -6,6 +6,25 @@
     chrome.runtime.sendMessage({ type: "FLOW_STATUS", status, detail, kind }).catch(() => {});
   }
 
+  function showCaptchaNotice() {
+    if (document.querySelector("#inline-helper-captcha-notice")) return;
+    const host = document.createElement("div");
+    host.id = "inline-helper-captcha-notice";
+    host.style.cssText = "position:fixed;top:16px;right:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));pointer-events:none;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+    const root = host.attachShadow({ mode: "open" });
+    root.innerHTML = `
+      <style>*{box-sizing:border-box}.notice{display:flex;gap:12px;padding:14px 16px;border:2px solid #c56b00;border-radius:14px;background:#fff9e8;box-shadow:0 12px 34px rgba(15,23,42,.2);color:#492c00}.mark{font-size:22px;font-weight:900;line-height:1}.copy{font-size:15px;line-height:1.5}.copy strong{display:block;margin-bottom:2px;font-size:17px}</style>
+      <section class="notice" role="status" aria-live="assertive" aria-atomic="true">
+        <span class="mark" aria-hidden="true">!</span>
+        <div class="copy"><strong>需要手動真人驗證</strong>請在 inline 視窗按住「按住不放」。完成後插件會自動繼續，不必重新開始。</div>
+      </section>`;
+    document.documentElement.appendChild(host);
+  }
+
+  function hideCaptchaNotice() {
+    document.querySelector("#inline-helper-captcha-notice")?.remove();
+  }
+
   function showPreviewComplete() {
     if (document.querySelector("#inline-helper-preview-complete")) return;
     const previouslyFocused = document.activeElement;
@@ -173,6 +192,24 @@
     );
   }
 
+  function timeButtonIsInRange(button, start, end) {
+    if (!button) return false;
+    const value = InlineHelperCommon.timeToMinutes(button.textContent);
+    const min = InlineHelperCommon.timeToMinutes(start);
+    const max = InlineHelperCommon.timeToMinutes(end);
+    return value !== null && min !== null && max !== null && value >= min && value <= max;
+  }
+
+  function pageSelectedDate() {
+    const dateInput = [...document.querySelectorAll('input[type="date"]')].find(visible);
+    if (dateInput?.value) return { value: dateInput.value, element: dateInput };
+    for (const element of [...document.querySelectorAll('button, [role="button"]')].filter(visible)) {
+      const value = InlineHelperCommon.dateTextToIso(element.textContent);
+      if (value) return { value, element };
+    }
+    return null;
+  }
+
   function selectBookingOption() {
     const nodes = [...document.querySelectorAll("p,h2,h3,h4,button")].filter(visible);
     const headingIndex = nodes.findIndex((node) =>
@@ -271,9 +308,11 @@
         return;
       }
       if (hasCaptcha()) {
+        showCaptchaNotice();
         report("CAPTCHA", "等待你手動完成人類驗證；完成後助手會繼續", "error");
         return;
       }
+      hideCaptchaNotice();
       if (hasInteractivePaymentStep()) {
         report("需付款", "已進入信用卡、訂金或驗證頁，請由你手動完成", "error");
         return;
@@ -304,7 +343,16 @@
       }
 
       if (adultPicker && selectBookingOption()) return;
-      if (adultPicker && !selectedTimeButton()) {
+      const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
+      const shownDate = pageSelectedDate();
+      if (adultPicker && shownDate && lastSelectedDate && shownDate.value !== lastSelectedDate) {
+        markNeedsAttention({ element: shownDate.element, label: "用餐日期" });
+        report("日期不符", `inline 目前顯示 ${shownDate.value}；請手動選擇 ${lastSelectedDate}，完成後助手會繼續`, "error");
+        return;
+      }
+      const selectedTime = selectedTimeButton();
+      const selectedTimeIsValid = timeButtonIsInRange(selectedTime, reservation.timeStart, reservation.timeEnd);
+      if (adultPicker && !selectedTimeIsValid) {
         const timeButton = findTimeButtonInRange(reservation.timeStart, reservation.timeEnd);
         if (timeButton) {
           report("選時段", `正在選擇 ${(timeButton.textContent || "").trim()}`);
@@ -312,7 +360,6 @@
           return;
         }
         if (findTimeButtons().length || document.querySelector(".time-slot")) {
-          const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
           const current = lastSelectedDate || reservation.dateStart;
           const following = nextDate(current);
           const scanCount = Number(state.scanCount || 0) + 1;
@@ -329,7 +376,7 @@
         }
       }
 
-      if (adultPicker && selectedTimeButton()) {
+      if (adultPicker && selectedTimeIsValid) {
         const paymentButton = [...document.querySelectorAll("button")].find((button) =>
           visible(button) && /授權信用卡|支付訂金|前往付款|付款.*確認/.test((button.textContent || "").trim())
         );

@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, restaurantMatchScore, selectRestaurantMatch, timeToMinutes } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -24,6 +24,9 @@ assert.equal(normalizeRestaurantInput("https://example.com/booking/a").kind, "in
 assert.equal(timeToMinutes("12:00"), 720);
 assert.equal(timeToMinutes("下午 1:30"), 810);
 assert.equal(timeToMinutes("18:00\nNT$1,000 x 3"), 1080);
+assert.equal(dateTextToIso("2026年10月12日"), "2026-10-12");
+assert.equal(dateTextToIso("2026/11/05"), "2026-11-05");
+assert.equal(dateTextToIso("2026-02-30"), null);
 assert.equal(restaurantMatchScore("辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", "辛殿信義店"), 1);
 assert.equal(selectRestaurantMatch([
   { name: "辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", bookingLink: bookingUrl },
@@ -105,6 +108,12 @@ assert.match(content, /role="dialog" aria-modal="true"/);
 assert.match(content, /event\.key === "Escape"/);
 assert.match(content, /prefers-reduced-motion:no-preference/);
 assert.match(content, /showPreviewComplete\(\);[\s\S]*report\("預演完成"/);
+assert.match(content, /function showCaptchaNotice\(\)/);
+assert.match(content, /完成後插件會自動繼續/);
+assert.match(content, /showCaptchaNotice\(\);[\s\S]*report\("CAPTCHA"/);
+assert.match(content, /shownDate\.value !== lastSelectedDate/);
+assert.match(content, /selectedTimeIsValid = timeButtonIsInRange/);
+assert.match(content, /if \(adultPicker && selectedTimeIsValid\)/);
 assert.match(content, /previewCompletedAt: Date\.now\(\)/);
 assert.match(content, /reservation: \{ \.\.\.reservation, enabled: false \}/);
 assert.match(background, /openScopedReservationTab\("https:\/\/dining\.inline\.app\/zh-tw\/"\)/);
