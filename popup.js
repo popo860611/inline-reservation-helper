@@ -19,7 +19,7 @@ const statusBox = document.querySelector("#status");
 const updateCard = document.querySelector(".update-card");
 const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
-const BUILD_VERSION = "0.3.4";
+const BUILD_VERSION = "0.3.5";
 let pendingUpdateAction = null;
 
 function localDate(offset = 0) {
@@ -35,7 +35,7 @@ function checkedAt() {
   return new Date().toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
 }
 
-async function renderInitialUpdateStatus() {
+function renderInitialUpdateStatus() {
   document.querySelector("#extension-version").textContent = `v${BUILD_VERSION}`;
   updateButton.hidden = false;
   updateButton.disabled = false;
@@ -43,21 +43,7 @@ async function renderInitialUpdateStatus() {
   updateCard.classList.remove("available");
   pendingUpdateAction = { type: "check" };
 
-  let backgroundVersion = "";
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "PING_BACKGROUND" });
-    if (response?.ok) backgroundVersion = response.version;
-  } catch (_error) {}
-
-  if (backgroundVersion && backgroundVersion !== BUILD_VERSION) {
-    updateMode.textContent = `新版檔案已就緒｜背景仍是 v${backgroundVersion}`;
-    updateCard.classList.add("available");
-    updateButton.textContent = "套用更新";
-    pendingUpdateAction = { type: "reload" };
-    return;
-  }
-
-  updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未檢查`;
+  updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未手動檢查`;
 }
 
 async function checkForUpdates() {
@@ -115,11 +101,6 @@ function compareVersions(left, right) {
 }
 
 updateButton.addEventListener("click", async () => {
-  if (pendingUpdateAction?.type === "reload") {
-    updateButton.textContent = "套用中…";
-    chrome.runtime.reload();
-    return;
-  }
   if (pendingUpdateAction?.type === "release" && pendingUpdateAction.url) {
     await chrome.tabs.create({ url: pendingUpdateAction.url, active: true });
     setStatus("已開啟新版下載頁。下載並覆蓋原資料夾後，再回到擴充功能按重新載入。", "ok");

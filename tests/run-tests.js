@@ -45,8 +45,11 @@ assert.doesNotMatch(popup, /restore\(\), renderUpdateStatus\(\)/);
 assert.match(popup, /restore\(\), renderInitialUpdateStatus\(\)/);
 assert.match(popupHtml, /id="apply-update"[^>]*>檢查更新<\/button>/);
 assert.doesNotMatch(popupHtml, /id="apply-update"[^>]*hidden/);
+assert.doesNotMatch(popup, /PING_BACKGROUND/);
+assert.doesNotMatch(popup, /chrome\.runtime\.reload/);
 
 const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
+assert.doesNotMatch(background, /PING_BACKGROUND/);
 assert.match(background, /pendingRestaurantSearch/);
 assert.match(background, /diner-network-api\.inline\.app\/diner-network\/search/);
 assert.match(background, /chrome\.tabs\.create\(\{ url: "https:\/\/dining\.inline\.app\/zh-tw\/"/);
