@@ -265,7 +265,7 @@ assert.ok(content.indexOf("safeSkipButton.click()") < content.indexOf('exactButt
 assert.match(content, /function detectStage\(\)/);
 assert.match(content, /type: "FLOW_STAGE"/);
 assert.match(background, /message\.type === "FLOW_STAGE"/);
-assert.match(content, /function scheduleAdvance\(delay = FAST_STEP_MS\)/);
+assert.match(content, /function scheduleAdvance\(delay = 0\)/);
 assert.match(content, /dataset\.inlineHelperVersion === CONTENT_VERSION\) return/);
 assert.match(content, /dataset\.inlineHelperVersion = CONTENT_VERSION/);
 assert.match(content, /type: "CONTENT_READY"/);

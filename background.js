@@ -225,7 +225,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       "activeReservationTabId", "lastOpenedUrl", "reservation"
     ])).then(async ({ activeReservationTabId, lastOpenedUrl, reservation }) => {
       const senderTabId = _sender.tab?.id;
-      let active = Number.isInteger(senderTabId) && senderTabId === activeReservationTabId && _sender.tab?.active === true;
+      const senderIdentity = InlineHelperCommon.bookingIdentity(_sender.tab?.url);
+      const expectedIdentity = InlineHelperCommon.bookingIdentity(lastOpenedUrl || reservation?.restaurantQuery);
+      let active = Number.isInteger(senderTabId) && senderTabId === activeReservationTabId &&
+        Boolean(senderIdentity && senderIdentity === expectedIdentity);
       const activeMatchingForm = Number.isInteger(senderTabId) && InlineHelperCommon.canAdoptFormScope({
         senderUrl: _sender.tab?.url,
         expectedUrl: lastOpenedUrl || reservation?.restaurantQuery,
@@ -286,6 +289,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js"] });
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      await chrome.tabs.sendMessage(tab.id, { type: "ADVANCE_FLOW" });
       return { ok: true };
     })().then(sendResponse).catch(() => sendResponse({ ok: false, error: "無法接手目前頁面，請重新整理 inline 頁面後再試。" }));
     return true;

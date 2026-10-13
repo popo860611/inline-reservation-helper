@@ -1,18 +1,24 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.45";
+  const CONTENT_VERSION = "0.3.46";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
   let busy = false;
   let pendingAdvance = false;
   let advanceTimer = null;
+  let scheduledDelay = Infinity;
+  let dateNavigationPending = false;
+  let dateNavigationAt = 0;
 
   // Keep the first queued check: continuous DOM updates must not postpone it.
-  function scheduleAdvance(delay = FAST_STEP_MS) {
-    if (advanceTimer !== null) return;
+  function scheduleAdvance(delay = 0) {
+    if (advanceTimer !== null && scheduledDelay <= delay) return;
+    if (advanceTimer !== null) clearTimeout(advanceTimer);
+    scheduledDelay = delay;
     advanceTimer = setTimeout(() => {
       advanceTimer = null;
+      scheduledDelay = Infinity;
       advance();
     }, delay);
   }
@@ -277,7 +283,7 @@
     return btoa(unescape(encodeURIComponent(json)));
   }
 
-  function navigateToDate(reservation, date) {
+  async function navigateToDate(reservation, date) {
     const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
     if (state.timeSelectedAt || state.detailsReached ||
         /\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname) ||
@@ -289,7 +295,21 @@
       pre_filled_form: encodePrefill(reservation, date),
       inline_helper: "1"
     });
-    chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` }).then(() => location.replace(url));
+    if (dateNavigationPending) return;
+    dateNavigationPending = true;
+    dateNavigationAt = Date.now();
+    try {
+      await chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` });
+      const latestState = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+      if (latestState.timeSelectedAt || latestState.detailsReached || hasBookingContactFields() || hasInteractivePaymentStep()) {
+        dateNavigationPending = false;
+        return;
+      }
+      location.replace(url);
+    } catch (error) {
+      dateNavigationPending = false;
+      throw error;
+    }
   }
 
   function setNativeValue(element, value) {
@@ -319,10 +339,11 @@
     return String(input.value || "").trim() === String(value).trim();
   }
 
-  function findTimeButtons() {
+  function findTimeButtons({ includeUnavailable = false } = {}) {
     return [...document.querySelectorAll("button")].filter((button) => {
-      if (!visible(button) || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
-      if (button.classList.contains("full") || /額滿|已滿|候補|無空位/i.test(button.textContent || "")) return false;
+      if (!visible(button)) return false;
+      if (!includeUnavailable && (button.disabled || button.getAttribute("aria-disabled") === "true" ||
+          button.classList.contains("full") || /額滿|已滿|候補|無空位/i.test(button.textContent || ""))) return false;
       return InlineHelperCommon.timeToMinutes(button.textContent) !== null;
     });
   }
@@ -563,6 +584,15 @@
       const { reservation } = await chrome.storage.local.get("reservation");
       if (!reservation?.enabled) return;
       watchForProgress = true;
+      if (dateNavigationPending) {
+        if (Date.now() - dateNavigationAt >= 5000) {
+          watchForProgress = false;
+          dateNavigationPending = false;
+          await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+          report("日期載入失敗", "已要求切換日期，但 inline 在 5 秒內未載入新頁面；請確認網路與頁面錯誤，再從外掛繼續。", "error");
+        }
+        return;
+      }
       const helperUrl = new URLSearchParams(location.search).has("inline_helper");
       const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
       const flowPath = /\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname);
@@ -587,7 +617,7 @@
       if (waitForManualConsent(modalConsentControl)) return;
       hideConsentNotice();
       if (!helperUrl && !detailsVisible && !state.timeSelectedAt) {
-        navigateToDate(reservation, reservation.dateStart);
+        await navigateToDate(reservation, reservation.dateStart);
         return;
       }
 
@@ -643,15 +673,14 @@
           timeButton.click();
           return;
         }
-        if (findTimeButtons().length || document.querySelector(".time-slot")) {
+        const loading = [...document.querySelectorAll('[aria-busy="true"], [role="progressbar"]')].some(visible);
+        const noAvailability = /(?:當日|本日|當天|此日期|所選日期).{0,20}(?:無|沒有|已無).{0,10}(?:空位|時段)|沒有可預訂的時段|無可用時段/.test(pageText());
+        if (!loading && (findTimeButtons({ includeUnavailable: true }).length || noAvailability)) {
           const current = lastSelectedDate || reservation.dateStart;
           const following = nextDate(current);
-          const scanCount = Number(state.scanCount || 0) + 1;
-          state.scanCount = scanCount;
-          sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-          if (following <= reservation.dateEnd && scanCount < 14) {
+          if (following <= reservation.dateEnd) {
             report("下一天", `${current} 沒有區間內時段，接著檢查 ${following}`);
-            setTimeout(() => navigateToDate(reservation, following), NAVIGATION_STEP_MS);
+            await navigateToDate(reservation, following);
           } else {
             await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
             report("沒有空位", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有找到 ${reservation.timeStart}–${reservation.timeEnd}`, "error");
@@ -777,7 +806,7 @@
         pendingAdvance = false;
         scheduleAdvance();
       } else if (watchForProgress) {
-        scheduleAdvance(1000);
+        scheduleAdvance(250);
       }
     }
   }
@@ -802,6 +831,11 @@
   });
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (document.documentElement.dataset.inlineHelperVersion !== CONTENT_VERSION) return false;
+    if (message.type === "ADVANCE_FLOW") {
+      advance();
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message.type === "FILL_CONTACT_DETAILS") {
       (async () => {
         const scope = await chrome.runtime.sendMessage({ type: "CHECK_FLOW_SCOPE", stage: "contact" });
@@ -835,6 +869,7 @@
     }
     if (areaName === "local" && changes.reservation?.newValue?.enabled &&
         !changes.reservation?.oldValue?.enabled) {
+      dateNavigationPending = false;
       const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
       if (state.timeSelectedAt && !state.detailsReached) {
         state.timeSelectedAt = Date.now();

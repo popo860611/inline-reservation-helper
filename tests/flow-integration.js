@@ -116,7 +116,7 @@ async function testDateScanStopsAfterTimeOrDetails() {
       storage: {
         local: {
           get: async () => ({ reservation, lastSelectedDate: "2026-10-19" }),
-          set: async () => {}
+          set: async () => { if (revealDetailsBeforeTimer) showDetails = true; }
         },
         onChanged: { addListener: () => {} }
       }
@@ -137,15 +137,87 @@ async function testDateScanStopsAfterTimeOrDetails() {
       assert.equal(timeClicks, 1);
       assert.equal(redirects, 0);
     } else {
-      assert.ok(timers.length >= 1);
-      if (revealDetailsBeforeTimer) showDetails = true;
-      timers.shift()();
       await new Promise(setImmediate);
       assert.equal(redirects, 0);
     }
   }
   await runScenario({ offerTime: true });
   await runScenario({ offerTime: false, revealDetailsBeforeTimer: true });
+}
+
+async function testDateRangeScansEveryDay() {
+  const reservation = { enabled: true, restaurantQuery: bookingUrl, adults: 2,
+    dateStart: "2026-10-17", dateEnd: "2026-10-30", timeStart: "17:30", timeEnd: "19:30" };
+  const saved = new Map([["inlineHelperFlowV2", JSON.stringify({ scanCount: 14 })]]);
+  let current = reservation.dateStart;
+  let now = 10000;
+  class TestDate extends Date { static now() { return now; } }
+  let observerCallback;
+  let redirects = [];
+  let pendingWrite;
+  let releaseWrite;
+  let countWrites = 0;
+  const statuses = [];
+  const time = { tagName: "BUTTON", textContent: "17:30", disabled: true,
+    classList: { contains: (name) => name === "full" }, getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 100, height: 40 }),
+    click: () => { throw new Error("Never select a full slot"); } };
+  const mount = () => {
+    const timers = new Map();
+    let timerId = 0;
+    const chrome = {
+      runtime: { sendMessage: async (message) => { statuses.push(message); return { active: true }; }, onMessage: { addListener() {} } },
+      storage: { local: {
+        get: async () => ({ reservation, lastSelectedDate: current }),
+        set: async (value) => {
+          if (value.lastSelectedDate) { countWrites += 1; current = value.lastSelectedDate; if (pendingWrite) await pendingWrite; }
+          if (value.reservation) Object.assign(reservation, value.reservation);
+        }
+      }, onChanged: { addListener() {} } }
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+      document: { documentElement: { dataset: {} }, body: { innerText: "" },
+        querySelector: (selector) => selector === "#adult-picker" ? { value: "2", options: [] } : null,
+        querySelectorAll: (selector) => selector === "button" ? [time] : [] },
+      chrome, InlineHelperCommon: common, URLSearchParams, Date: TestDate, btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+      location: { href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1", pathname: "/booking/-company/-branch", replace: (url) => redirects.push(url) },
+      sessionStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
+      MutationObserver: class { constructor(callback) { observerCallback = callback; } observe() {} disconnect() {} },
+      getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+      setTimeout: (callback) => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: (id) => timers.delete(id)
+    });
+    return timers;
+  };
+  pendingWrite = new Promise((resolve) => { releaseWrite = resolve; });
+  const timers = mount();
+  await new Promise(setImmediate);
+  for (let i = 0; i < 20; i += 1) observerCallback();
+  const [id, callback] = timers.entries().next().value;
+  timers.delete(id); callback();
+  releaseWrite(); pendingWrite = null;
+  await new Promise(setImmediate);
+  assert.equal(countWrites, 1, "DOM changes must not duplicate next-day navigation");
+  assert.equal(redirects.length, 1);
+  assert.equal(current, "2026-10-18");
+  for (let day = 18; day <= 30; day += 1) {
+    mount();
+    await new Promise(setImmediate);
+  }
+  assert.equal(current, "2026-10-30");
+  assert.equal(countWrites, 13, "Scan through the configured last day despite stale scan counters");
+  assert.equal(redirects.length, 13);
+  assert.equal(reservation.enabled, false);
+  assert.ok(statuses.some((message) => message.status === "沒有空位"));
+  reservation.enabled = true;
+  current = reservation.dateStart;
+  const stalledTimers = mount();
+  await new Promise(setImmediate);
+  now += 6000;
+  const [stalledId, stalledCheck] = stalledTimers.entries().next().value;
+  stalledTimers.delete(stalledId); stalledCheck();
+  await new Promise(setImmediate);
+  assert.equal(reservation.enabled, false);
+  assert.ok(statuses.some((message) => message.status === "日期載入失敗"));
 }
 
 async function testWaitingFlowRecovers() {
@@ -214,6 +286,9 @@ async function testWaitingFlowRecovers() {
   await tick();
   assert.equal(scopeRequests, 2);
   assert.equal(clicks, 1, "Do not double click while inline is transitioning");
+  observerCallback();
+  assert.equal(timers.size, 1);
+  assert.equal(timers.values().next().value.delay, 0, "Page updates must preempt the fallback check immediately");
   now += 2000;
   await tick();
   assert.equal(clicks, 2, "Retry a selected slot when inline ignored the first next click");
@@ -602,6 +677,16 @@ async function testScopedBackgroundRelay() {
   assert.equal((await checkScope("availability")).active, false);
   assert.equal((await checkScope("payment")).active, true);
   assert.equal(stored.activeReservationTabId, 8);
+  const inactiveScope = await new Promise((resolve) => messageHandler(
+    { type: "CHECK_FLOW_SCOPE", stage: "availability" },
+    { tab: { id: 8, active: false, url: bookingUrl } }, resolve
+  ));
+  assert.equal(inactiveScope.active, true, "The scoped task must continue when its tab is in the background");
+  const wrongRestaurantScope = await new Promise((resolve) => messageHandler(
+    { type: "CHECK_FLOW_SCOPE", stage: "availability" },
+    { tab: { id: 8, active: false, url: "https://inline.app/booking/-company/-other" } }, resolve
+  ));
+  assert.equal(wrongRestaurantScope.active, false);
   tabUrl = `${bookingUrl}/form`;
   stored.reservation.enabled = false;
   stored.reservation.autoSubmit = true;
@@ -611,6 +696,7 @@ async function testScopedBackgroundRelay() {
   assert.equal(stored.reservation.autoSubmit, false);
   assert.equal(stored.activeReservationTabId, 7);
   assert.deepEqual(injected.slice(-2), ["common.js", "content.js"]);
+  assert.equal(sent.at(-1).message.type, "ADVANCE_FLOW");
   stored.reservation.enabled = false;
   activeTabIsTask = false;
   assert.equal((await resume(sender)).ok, true);
@@ -627,6 +713,7 @@ Promise.all([
   testContactFill("", "測試姓名", false),
   testDateScanStopsAfterTimeOrDetails(),
   testWaitingFlowRecovers(),
+  testDateRangeScansEveryDay(),
   testTapPayRequiresManualCard(),
   testOldConsentNoticeClearsAfterTaskStops(),
   testDepositConsentDoesNotRecreateRulesNotice(true),
