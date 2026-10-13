@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.46";
+  const CONTENT_VERSION = "0.3.47";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -340,7 +340,9 @@
   }
 
   function findTimeButtons({ includeUnavailable = false } = {}) {
-    return [...document.querySelectorAll("button")].filter((button) => {
+    const buttons = [...document.querySelectorAll("button")];
+    const slots = buttons.filter((button) => button.classList.contains("time-slot"));
+    return (slots.length ? slots : buttons).filter((button) => {
       if (!visible(button)) return false;
       if (!includeUnavailable && (button.disabled || button.getAttribute("aria-disabled") === "true" ||
           button.classList.contains("full") || /額滿|已滿|候補|無空位/i.test(button.textContent || ""))) return false;
@@ -348,20 +350,31 @@
     });
   }
 
-  function findTimeButtonInRange(start, end) {
+  function findTimeButtonInRange(start, end, rejected = []) {
     const min = InlineHelperCommon.timeToMinutes(start);
     const max = InlineHelperCommon.timeToMinutes(end);
     return findTimeButtons()
       .map((button) => ({ button, value: InlineHelperCommon.timeToMinutes(button.textContent) }))
-      .filter((item) => item.value >= min && item.value <= max)
+      .filter((item) => item.value >= min && item.value <= max && !rejected.includes(item.value))
       .sort((a, b) => a.value - b.value)[0]?.button || null;
   }
 
   function selectedTimeButton() {
-    return findTimeButtons().find((button) =>
+    const selected = findTimeButtons().find((button) =>
       button.classList.contains("selected") || button.getAttribute("aria-pressed") === "true" ||
       /已選擇|selected/i.test(button.getAttribute("aria-label") || "")
     );
+    if (selected) return selected;
+    // Some inline pages show selection only in the bottom booking summary.
+    if (!findBookingDetailsButton()) return null;
+    return [...document.querySelectorAll("button")].find((button) => visible(button) &&
+      !button.classList.contains("time-slot") && /^\s*(?:時段\s*)?\d{1,2}[:：]\d{2}\s*$/.test(button.textContent || "")) || null;
+  }
+
+  function findBookingDetailsButton() {
+    return [...document.querySelectorAll("button")].find((button) => visible(button) &&
+      !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+      /^(?:下一步(?:[，,:：\s]*填寫(?:訂位)?資料)?|填寫(?:訂位)?(?:資料|聯絡資訊))$/.test(buttonText(button)));
   }
 
   function timeButtonIsInRange(button, start, end) {
@@ -664,10 +677,43 @@
       if (adultPicker && selectBookingOption()) return;
       const selectedTime = selectedTimeButton();
       const selectedTimeIsValid = timeButtonIsInRange(selectedTime, reservation.timeStart, reservation.timeEnd);
+      if (adultPicker && selectedTimeIsValid && (!state.timeSelectedAt || state.selectionVerifiedVersion !== CONTENT_VERSION)) {
+        state.timeSelectedAt ||= Date.now();
+        state.selectionVerifiedVersion = CONTENT_VERSION;
+        delete state.pendingTimeSelection;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
+      if (adultPicker && !selectedTimeIsValid && state.timeSelectedAt &&
+          (!state.bookingButtonClickedAt || state.selectionVerifiedVersion !== CONTENT_VERSION)) {
+        // Older versions recorded a click before inline accepted the selection.
+        delete state.timeSelectedAt;
+        delete state.bookingButtonClickedAt;
+        delete state.bookingButtonAttempts;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
       if (adultPicker && !selectedTimeIsValid && !state.timeSelectedAt) {
-        const timeButton = findTimeButtonInRange(reservation.timeStart, reservation.timeEnd);
+        const scanDate = lastSelectedDate || reservation.dateStart;
+        const rejected = state.rejectedTimes?.[scanDate] || [];
+        const pending = state.pendingTimeSelection;
+        if (pending && pending.date === scanDate) {
+          if (Date.now() - pending.clickedAt < 1500) {
+            report("確認時段", "已按時段，正在確認 inline 是否接受選取");
+            return;
+          }
+          if (pending.attempts >= 3) {
+            state.rejectedTimes ||= {};
+            state.rejectedTimes[scanDate] = [...new Set([...rejected, pending.minutes])];
+            delete state.pendingTimeSelection;
+            sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+            report("時段未接受", "inline 未接受這個時段，正在檢查其他可用時段");
+            return;
+          }
+        }
+        const timeButton = findTimeButtonInRange(reservation.timeStart, reservation.timeEnd, rejected);
         if (timeButton) {
-          state.timeSelectedAt = Date.now();
+          const minutes = InlineHelperCommon.timeToMinutes(timeButton.textContent);
+          state.pendingTimeSelection = { date: scanDate, minutes, clickedAt: Date.now(),
+            attempts: pending?.date === scanDate && pending.minutes === minutes ? pending.attempts + 1 : 1 };
           sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
           report("選時段", `正在選擇 ${(timeButton.textContent || "").trim()}`);
           timeButton.click();
@@ -707,7 +753,7 @@
         }
       }
       if (adultPicker && (selectedTimeIsValid || state.timeSelectedAt)) {
-        const bookingButton = exactButton("填寫訂位資料", "下一步");
+        const bookingButton = findBookingDetailsButton();
         if (bookingButton && !bookingButton.disabled &&
             (!state.bookingButtonClickedAt || (selectedTimeIsValid &&
               Date.now() - state.bookingButtonClickedAt >= 1500 &&
@@ -875,6 +921,8 @@
         state.timeSelectedAt = Date.now();
         delete state.bookingButtonClickedAt;
         delete state.bookingButtonAttempts;
+        delete state.pendingTimeSelection;
+        delete state.rejectedTimes;
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
       }
     }

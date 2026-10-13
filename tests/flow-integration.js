@@ -220,6 +220,66 @@ async function testDateRangeScansEveryDay() {
   assert.ok(statuses.some((message) => message.status === "日期載入失敗"));
 }
 
+async function testTimeSelectionAcceptance(accept, footerOnly = false) {
+  let now = 10000;
+  class TestDate extends Date { static now() { return now; } }
+  let selected = false;
+  let slotClicks = 0;
+  let nextClicks = 0;
+  let redirects = 0;
+  const timers = new Map();
+  let timerId = 0;
+  const saved = new Map([["inlineHelperFlowV2", JSON.stringify({ timeSelectedAt: 1000 })]]);
+  const reservation = { enabled: true, restaurantQuery: bookingUrl, adults: 2,
+    dateStart: "2026-10-17", dateEnd: "2026-10-30", timeStart: "17:30", timeEnd: "19:30" };
+  const slot = { tagName: "BUTTON", textContent: "10月17日17:30", disabled: footerOnly,
+    classList: { contains: (name) => name === "time-slot" || (footerOnly && name === "full") },
+    getAttribute: () => null, getBoundingClientRect: () => ({ width: 100, height: 40 }),
+    click: () => { slotClicks += 1; selected = accept; } };
+  const summary = { ...slot, textContent: "17:30", disabled: false,
+    classList: { contains: () => false },
+    click: () => { throw new Error("A booking summary is not an available slot"); } };
+  const next = { ...summary, textContent: "下一步，填寫訂位資料",
+    get disabled() { return !selected; }, click: () => { nextClicks += 1; } };
+  const chrome = {
+    runtime: { sendMessage: async () => ({ active: true }), onMessage: { addListener() {} } },
+    storage: { local: { get: async () => ({ reservation, lastSelectedDate: "2026-10-17" }), set: async () => {} }, onChanged: { addListener() {} } }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document: { documentElement: { dataset: {} }, body: { innerText: "" },
+      querySelector: (selector) => selector === "#adult-picker" ? { value: "2", options: [] } : null,
+      querySelectorAll: (selector) => selector === "button" ? [slot, summary, next] : [] },
+    chrome, InlineHelperCommon: common, URLSearchParams, Date: TestDate,
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    location: { href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1", pathname: "/booking/-company/-branch", replace: () => { redirects += 1; } },
+    sessionStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
+    MutationObserver: class { observe() {} disconnect() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    setTimeout: (callback) => { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout: (id) => timers.delete(id)
+  });
+  await new Promise(setImmediate);
+  if (!accept && !footerOnly) {
+    assert.equal(JSON.parse(saved.get("inlineHelperFlowV2")).timeSelectedAt, undefined,
+      "Clicking a slot must not count as an accepted selection");
+  }
+  for (let step = 0; step < 20 && timers.size && !redirects && !nextClicks; step += 1) {
+    now += 500;
+    const [id, callback] = timers.entries().next().value;
+    timers.delete(id); callback();
+    await new Promise(setImmediate);
+  }
+  if (accept) {
+    assert.equal(slotClicks, 1);
+    assert.equal(nextClicks, 1, "Recognize inline selection in the footer and the next-button wording");
+    assert.equal(redirects, 0);
+    assert.ok(JSON.parse(saved.get("inlineHelperFlowV2")).timeSelectedAt);
+  } else {
+    assert.equal(slotClicks, footerOnly ? 0 : 3);
+    assert.equal(nextClicks, 0);
+    assert.equal(redirects, 1, "Unaccepted or full slots must continue the date search");
+  }
+}
+
 async function testWaitingFlowRecovers() {
   let now = 10000;
   let observerCallback;
@@ -714,6 +774,9 @@ Promise.all([
   testDateScanStopsAfterTimeOrDetails(),
   testWaitingFlowRecovers(),
   testDateRangeScansEveryDay(),
+  testTimeSelectionAcceptance(true),
+  testTimeSelectionAcceptance(false),
+  testTimeSelectionAcceptance(false, true),
   testTapPayRequiresManualCard(),
   testOldConsentNoticeClearsAfterTaskStops(),
   testDepositConsentDoesNotRecreateRulesNotice(true),
