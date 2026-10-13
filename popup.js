@@ -23,7 +23,7 @@ const backgroundVersionDetail = document.querySelector("#background-version-deta
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.18";
+const BUILD_VERSION = "0.3.19";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -53,7 +53,7 @@ function renderInitialUpdateStatus() {
 }
 
 function renderRunMode() {
-  modeToggle.textContent = liveMode.checked ? "實際｜可能送出" : "預演｜不送出";
+  modeToggle.textContent = liveMode.checked ? "實際｜自動確認" : "預演｜不送出";
   modeToggle.classList.toggle("live", liveMode.checked);
   modeToggle.setAttribute("aria-pressed", String(liveMode.checked));
 }
@@ -150,7 +150,7 @@ modeToggle.addEventListener("click", () => {
   renderRunMode();
   setStatus(
     liveMode.checked
-      ? "已切換為實際模式；無付款／OTP 且沒有 CAPTCHA 時，可能完成訂位。"
+      ? "已切換為實際模式；條款與金額會自動確認，只有需要填卡、OTP 或 CAPTCHA 時才會停止。"
       : "已切換為預演模式；只找位與填寫，不會送出最終訂位。",
     liveMode.checked ? "error" : "ok"
   );
@@ -258,7 +258,7 @@ document.querySelector("#open-now").addEventListener("click", async () => {
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
     const modeText = reservation.autoSubmit
-      ? "實際模式：找到無付款／OTP 的可用時段後會送出最終訂位。"
+      ? "實際模式：條款與金額會自動確認；需要填卡、OTP 或 CAPTCHA 時才會停止。"
       : "模擬模式：只找位與填寫，會停在最後送出前。";
     const searchText = response.mode === "url"
       ? "已忽略排程時間，立即開始尋找可用時段。"

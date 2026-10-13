@@ -105,6 +105,12 @@
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
+  function authorizationAction({ autoSubmit, submitAttemptedAt }) {
+    if (!autoSubmit) return "preview";
+    if (submitAttemptedAt) return "wait";
+    return "submit";
+  }
+
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
     setUrlQueryParams,
@@ -112,6 +118,7 @@
     selectRestaurantMatch,
     normalizeTime,
     timeToMinutes,
-    dateTextToIso
+    dateTextToIso,
+    authorizationAction
   };
 })();

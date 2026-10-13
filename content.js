@@ -93,9 +93,9 @@
   }
 
   function hasInteractivePaymentStep() {
-    if (/\/(payment|checkout|credit-card|deposit)(\/|$)/i.test(location.pathname)) return true;
     const control = document.querySelector([
       'input[autocomplete^="cc-"]', 'input[name*="card" i]', 'input[id*="card" i]',
+      'input[autocomplete="one-time-code"]', 'input[name*="otp" i]', 'input[id*="otp" i]',
       'iframe[src*="stripe" i]', 'iframe[src*="payment" i]', 'iframe[src*="3ds" i]'
     ].join(","));
     return Boolean(control && visible(control));
@@ -203,9 +203,10 @@
   function pageSelectedDate() {
     const dateInput = [...document.querySelectorAll('input[type="date"]')].find(visible);
     if (dateInput?.value) return { value: dateInput.value, element: dateInput };
+    const datePicker = document.querySelector("#date-picker");
     for (const element of [...document.querySelectorAll('button, [role="button"]')].filter(visible)) {
       const value = InlineHelperCommon.dateTextToIso(element.textContent);
-      if (value) return { value, element };
+      if (value) return { value, element: visible(datePicker) ? datePicker : element };
     }
     return null;
   }
@@ -215,7 +216,7 @@
     return match ? Number(match[1]) * 12 + Number(match[2]) - 1 : null;
   }
 
-  function selectTargetCalendarDate(targetDate) {
+  function selectTargetCalendarDate(targetDate, opener) {
     const cell = document.querySelector(`[data-date="${targetDate}"]`);
     if (cell && visible(cell)) {
       if (getComputedStyle(cell).cursor !== "pointer") return "unavailable";
@@ -224,9 +225,15 @@
       return "selected";
     }
 
+    if (opener && visible(opener)) {
+      report("展開日期", `正在開啟月曆以選擇 ${targetDate}`);
+      opener.click();
+      return "opening";
+    }
+
     const target = new Date(`${targetDate}T12:00:00`);
     const targetMonth = target.getFullYear() * 12 + target.getMonth();
-    const shownMonths = [...document.querySelectorAll("h4")]
+    const shownMonths = [...document.querySelectorAll("h4")].filter(visible)
       .map((heading) => calendarMonthValue(heading.textContent))
       .filter((value) => value !== null)
       .sort((left, right) => left - right);
@@ -321,7 +328,8 @@
 
   function findPaymentAuthorizationButton() {
     return [...document.querySelectorAll("button")].find((button) =>
-      visible(button) && /授權信用卡|信用卡.*確認訂位|支付訂金|前往付款|付款.*確認|預授權/.test((button.textContent || "").trim())
+      visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+      /授權信用卡|信用卡.*確認訂位|支付訂金|前往付款|付款.*確認|預授權/.test((button.textContent || "").trim())
     ) || null;
   }
 
@@ -358,6 +366,7 @@
       const { reservation } = await chrome.storage.local.get("reservation");
       if (!reservation?.enabled) return;
       const helperUrl = new URLSearchParams(location.search).has("inline_helper");
+      const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
 
       if (isSuccessPage()) {
         await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "訂位完成" });
@@ -378,8 +387,27 @@
       if (acceptManualConsent(manualConsentControl)) return;
       const paymentAuthorizationButton = findPaymentAuthorizationButton();
       if (paymentAuthorizationButton) {
-        markNeedsAttention({ element: paymentAuthorizationButton, label: "信用卡授權與確認訂位" });
-        report("需你授權", "條款與畫面金額已處理；此按鈕本身會授權信用卡並確認訂位，請手動按下後提供下一頁畫面", "error");
+        const authorizationAction = InlineHelperCommon.authorizationAction({
+          autoSubmit: reservation.autoSubmit,
+          submitAttemptedAt: state.submitAttemptedAt
+        });
+        if (authorizationAction === "preview") {
+          await chrome.storage.local.set({
+            reservation: { ...reservation, enabled: false },
+            previewCompletedAt: Date.now()
+          });
+          showPreviewComplete();
+          report("預演完成", "已到信用卡授權與確認訂位前；預演模式沒有送出訂位");
+          return;
+        }
+        if (authorizationAction === "wait") {
+          report("請確認", "已按過信用卡授權與確認訂位，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
+          return;
+        }
+        state.submitAttemptedAt = Date.now();
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+        report("確認中", "條款與金額已處理，正在授權信用卡並確認訂位");
+        paymentAuthorizationButton.click();
         return;
       }
       if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
@@ -387,7 +415,6 @@
         return;
       }
 
-      const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
       const adultPicker = document.querySelector("#adult-picker");
       if (adultPicker) {
         const option = [...adultPicker.options].find((item) => (item.textContent || "").includes(`${reservation.adults}位大人`));
@@ -407,12 +434,11 @@
         }
       }
 
-      if (adultPicker && selectBookingOption()) return;
       const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
       const shownDate = pageSelectedDate();
       if (adultPicker && shownDate && lastSelectedDate && shownDate.value !== lastSelectedDate) {
-        const dateResult = selectTargetCalendarDate(lastSelectedDate);
-        if (dateResult === "selected" || dateResult === "navigating") return;
+        const dateResult = selectTargetCalendarDate(lastSelectedDate, shownDate.element);
+        if (["selected", "opening", "navigating"].includes(dateResult)) return;
         if (dateResult === "unavailable") {
           const following = nextDate(lastSelectedDate);
           if (following <= reservation.dateEnd) {
@@ -429,6 +455,7 @@
         report("日期失敗", `找不到 ${lastSelectedDate} 的月曆日期格，已停止以避免選錯日期`, "error");
         return;
       }
+      if (adultPicker && selectBookingOption()) return;
       const selectedTime = selectedTimeButton();
       const selectedTimeIsValid = timeButtonIsInRange(selectedTime, reservation.timeStart, reservation.timeEnd);
       if (adultPicker && !selectedTimeIsValid) {
