@@ -24,7 +24,7 @@ const pageRuntimeVersion = document.querySelector("#page-runtime-version");
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.24";
+const BUILD_VERSION = "0.3.25";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 

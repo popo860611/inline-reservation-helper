@@ -23,17 +23,24 @@ const flowScopeMigrationReady = migrateUnsafeGlobalFlow();
 
 async function reloadActiveReservationTabAfterUpdate() {
   await flowScopeMigrationReady;
-  const stored = await chrome.storage.local.get([
-    RELOAD_INLINE_AFTER_RESTART, "activeReservationTabId", "lastOpenedUrl", "reservation"
-  ]);
+  const stored = await chrome.storage.local.get(RELOAD_INLINE_AFTER_RESTART);
   if (!stored[RELOAD_INLINE_AFTER_RESTART]) return;
   await chrome.storage.local.remove(RELOAD_INLINE_AFTER_RESTART);
   try {
     const tabs = await chrome.tabs.query({ url: ["https://inline.app/booking/*"] });
-    const matchingTabIds = InlineHelperCommon.matchingBookingTabIds(
-      tabs, stored.lastOpenedUrl || stored.reservation?.restaurantQuery
-    );
-    await Promise.all(matchingTabIds.map((tabId) => chrome.tabs.reload(tabId)));
+    const injectableTabs = tabs.filter((tab) => Number.isInteger(tab.id));
+    const results = await Promise.allSettled(injectableTabs.map(async (tab) => {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js"] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+    }));
+    const failedTabs = injectableTabs.filter((_tab, index) => results[index].status === "rejected");
+    await Promise.allSettled(failedTabs.map((tab) => chrome.tabs.reload(tab.id)));
+    await chrome.storage.local.set({
+      flowStatus: failedTabs.length
+        ? `新版助手已注入 ${injectableTabs.length - failedTabs.length} 個頁面；另重新整理 ${failedTabs.length} 個頁面`
+        : `新版助手已注入 ${injectableTabs.length} 個 inline 頁面`,
+      flowStatusKind: failedTabs.length === injectableTabs.length && injectableTabs.length ? "error" : "ok"
+    });
   } catch (_error) {}
 }
 

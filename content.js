@@ -1,6 +1,7 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.24";
+  const CONTENT_VERSION = "0.3.25";
+  if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
   let busy = false;
 
   document.documentElement.dataset.inlineHelperVersion = CONTENT_VERSION;
