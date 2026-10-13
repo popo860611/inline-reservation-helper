@@ -168,6 +168,19 @@
     return true;
   }
 
+  function fillContactName(value) {
+    if (!value) return false;
+    const familyInput = document.querySelector('#familyName, input[autocomplete="family-name"]');
+    const givenInput = document.querySelector('#givenName, input[autocomplete="given-name"]');
+    if ((familyInput && visible(familyInput)) || (givenInput && visible(givenInput))) {
+      const { familyName, givenName } = InlineHelperCommon.splitContactName(value);
+      const familyChanged = fillInput(['#familyName', 'input[autocomplete="family-name"]'], familyName);
+      const givenChanged = fillInput(['#givenName', 'input[autocomplete="given-name"]'], givenName);
+      return familyChanged || givenChanged;
+    }
+    return fillInput(['#name', 'input[autocomplete="name"]'], value) || fillByHint(/訂位人姓名|訂位人|姓名/i, value);
+  }
+
   function findTimeButtons() {
     return [...document.querySelectorAll("button")].filter((button) => {
       if (!visible(button) || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
@@ -379,10 +392,6 @@
         return;
       }
       hideCaptchaNotice();
-      if (hasInteractivePaymentStep()) {
-        report("需付款", "已進入信用卡、訂金或驗證頁，請由你手動完成", "error");
-        return;
-      }
       const manualConsentControl = findManualConsentControl();
       if (manualConsentControl && state.authorizationStepAttemptedAt) {
         delete state.authorizationStepAttemptedAt;
@@ -473,10 +482,18 @@
       const changed = [
         fillInput(['#phone', 'input[type="tel"]'], reservation.contactPhone) || fillByHint(/手機|電話|phone|mobile|tel/i, reservation.contactPhone),
         fillInput(['#email', 'input[type="email"]'], reservation.contactEmail) || fillByHint(/email|e-mail|電子信箱|信箱/i, reservation.contactEmail),
-        fillInput(['#name', 'input[autocomplete="name"]'], reservation.contactName) || fillByHint(/姓名|訂位人|name/i, reservation.contactName)
+        fillContactName(reservation.contactName)
       ];
       if (chooseDiningPurpose(reservation)) return;
-      if (changed.some(Boolean)) report("已填寫", "聯絡資料已填入本頁");
+      if (changed.some(Boolean)) {
+        report("已填寫", "姓名、手機與 Email 已填入訂位資料頁");
+        return;
+      }
+
+      if (hasInteractivePaymentStep()) {
+        report("需填信用卡", "訂位資料已自動填妥；信用卡、OTP 或付款驗證請由你手動完成", "error");
+        return;
+      }
 
       const missing = unansweredRequired();
       if (missing) {

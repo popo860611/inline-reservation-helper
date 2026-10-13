@@ -116,6 +116,14 @@
     return /我已閱讀並同意|我同意.*(?:信用卡綁定|預收取消費|須知|服務條款|隱私權)|同意.*規則|同意.*注意事項|接受.*條款/.test(String(value || "").trim());
   }
 
+  function splitContactName(value) {
+    const name = String(value || "").trim().replace(/\s+/g, " ");
+    if (!name) return { familyName: "", givenName: "" };
+    const parts = name.split(" ");
+    if (parts.length > 1) return { familyName: parts[0], givenName: parts.slice(1).join(" ") };
+    return { familyName: name.slice(0, 1), givenName: name.slice(1) };
+  }
+
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
     setUrlQueryParams,
@@ -125,6 +133,7 @@
     timeToMinutes,
     dateTextToIso,
     finalSubmitAction,
-    isAutoConsentText
+    isAutoConsentText,
+    splitContactName
   };
 })();

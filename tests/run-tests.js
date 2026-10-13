@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -34,6 +34,8 @@ assert.equal(finalSubmitAction({ autoSubmit: true, submitAttemptedAt: Date.now()
 assert.equal(isAutoConsentText("我已閱讀並同意規則與注意事項"), true);
 assert.equal(isAutoConsentText("我同意上述信用卡綁定及預收取消費須知"), true);
 assert.equal(isAutoConsentText("我願意收到餐廳優惠與活動資訊"), false);
+assert.deepEqual(splitContactName("張廷菘"), { familyName: "張", givenName: "廷菘" });
+assert.deepEqual(splitContactName("王 小明"), { familyName: "王", givenName: "小明" });
 assert.equal(restaurantMatchScore("辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", "辛殿信義店"), 1);
 assert.equal(selectRestaurantMatch([
   { name: "辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", bookingLink: bookingUrl },
@@ -138,6 +140,14 @@ assert.doesNotMatch(content, /function checkRequiredAgreements/);
 assert.doesNotMatch(content, /checkbox\.click\(\)/);
 assert.match(content, /function findManualConsentControl\(\)/);
 assert.match(content, /InlineHelperCommon\.isAutoConsentText\(element\.textContent\)/);
+assert.match(content, /function fillContactName\(value\)/);
+assert.match(content, /#familyName, input\[autocomplete="family-name"\]/);
+assert.match(content, /#givenName, input\[autocomplete="given-name"\]/);
+assert.match(content, /InlineHelperCommon\.splitContactName\(value\)/);
+assert.ok(content.indexOf("fillContactName(reservation.contactName)") < content.indexOf("if (hasInteractivePaymentStep())"));
+assert.ok(content.indexOf("fillInput(['#phone'") < content.indexOf("if (hasInteractivePaymentStep())"));
+assert.ok(content.indexOf("fillInput(['#email'") < content.indexOf("if (hasInteractivePaymentStep())"));
+assert.match(content, /訂位資料已自動填妥；信用卡、OTP 或付款驗證請由你手動完成/);
 assert.match(content, /function acceptManualConsent\(control\)/);
 assert.match(content, /scrollable\.scrollTop = scrollable\.scrollHeight/);
 assert.match(content, /control\.click\(\);[\s\S]*已同意條款/);
