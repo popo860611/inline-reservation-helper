@@ -100,6 +100,7 @@ async function openReservation(reservation) {
     throw new Error("餐廳網址無效，請貼上 inline 官方訂位網址或輸入餐廳名稱。");
   }
   reservation.restaurantQuery = normalized.value;
+  await chrome.storage.local.set({ flowLeaseUntil: Date.now() + 30 * 60_000 });
   if (normalized.kind === "name") {
     try {
       const resolved = await resolveRestaurantName(reservation.restaurantQuery);
@@ -216,20 +217,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "CHECK_FLOW_SCOPE") {
     extensionReady.then(() => chrome.storage.local.get([
-      "activeReservationTabId", "lastOpenedUrl", "reservation"
-    ])).then(async ({ activeReservationTabId, lastOpenedUrl, reservation }) => {
+      "activeReservationTabId", "lastOpenedUrl", "reservation", "flowLeaseUntil"
+    ])).then(async ({ activeReservationTabId, lastOpenedUrl, reservation, flowLeaseUntil }) => {
       const senderTabId = _sender.tab?.id;
       let active = Number.isInteger(senderTabId) && senderTabId === activeReservationTabId;
+      const leaseActive = Number(flowLeaseUntil || 0) > Date.now();
       const activeMatchingForm = Number.isInteger(senderTabId) && InlineHelperCommon.canAdoptFormScope({
         senderUrl: _sender.tab?.url,
         expectedUrl: lastOpenedUrl || reservation?.restaurantQuery,
         senderActive: _sender.tab?.active,
-        reservationEnabled: reservation?.enabled
+        reservationEnabled: reservation?.enabled || leaseActive
       });
-      if (!active && reservation?.enabled && activeMatchingForm) {
+      if ((!active || !reservation?.enabled) && leaseActive && activeMatchingForm) {
         active = true;
         await chrome.storage.local.set({
           activeReservationTabId: senderTabId,
+          reservation: { ...reservation, enabled: true },
           flowStatus: "已接手目前顯示的訂位資料頁",
           flowStatusKind: "ok"
         });
@@ -284,7 +287,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     Promise.all([
       chrome.alarms.clear(ALARM_NAME),
       chrome.alarms.clear(PREP_ALARM_NAME),
-      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"])
+      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch", "flowLeaseUntil"])
     ]).then(() => sendResponse({ ok: true }));
     return true;
   }

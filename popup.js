@@ -26,7 +26,7 @@ const saveSettingsStatus = document.querySelector("#save-settings-status");
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.29";
+const BUILD_VERSION = "0.3.30";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 

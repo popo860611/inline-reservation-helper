@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.29";
+  const CONTENT_VERSION = "0.3.30";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -377,10 +377,12 @@
     });
     if (!purposeChoices.length || purposeChoices.some(controlIsSelected)) return false;
     const aliases = wanted === "朋友聚餐" ? ["朋友聚餐", "一般聚餐", "親友聚餐", "同住親友聚餐"] : [wanted];
-    const choice = aliases.map((label) => purposeChoices.find((item) => (item.textContent || "").trim() === label)).find(Boolean);
+    const choiceText = (item) => String(item.textContent || item.getAttribute("aria-label") ||
+      (item.labels ? [...item.labels].map((label) => label.textContent).join(" ") : "")).trim();
+    const choice = aliases.map((label) => purposeChoices.find((item) => choiceText(item) === label)).find(Boolean);
     if (!choice || controlIsSelected(choice)) return false;
     choice.click();
-    report("填目的", `已選擇用餐目的：${(choice.textContent || wanted).trim()}`);
+    report("填目的", `已選擇用餐目的：${choiceText(choice) || wanted}`);
     return true;
   }
 
@@ -499,7 +501,7 @@
       publishStage(detectStage());
 
       if (isSuccessPage()) {
-        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "訂位完成" });
+        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowLeaseUntil: 0, flowStatus: "訂位完成" });
         report("完成", "inline 已顯示訂位成功");
         return;
       }
@@ -677,6 +679,7 @@
       if (finalAction === "preview") {
         await chrome.storage.local.set({
           reservation: { ...reservation, enabled: false },
+          flowLeaseUntil: 0,
           previewCompletedAt: Date.now()
         });
         showPreviewComplete();
