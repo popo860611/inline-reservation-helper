@@ -1,10 +1,21 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.44";
+  const CONTENT_VERSION = "0.3.45";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
   let busy = false;
+  let pendingAdvance = false;
+  let advanceTimer = null;
+
+  // Keep the first queued check: continuous DOM updates must not postpone it.
+  function scheduleAdvance(delay = FAST_STEP_MS) {
+    if (advanceTimer !== null) return;
+    advanceTimer = setTimeout(() => {
+      advanceTimer = null;
+      advance();
+    }, delay);
+  }
 
   document.documentElement.dataset.inlineHelperVersion = CONTENT_VERSION;
   chrome.runtime.sendMessage({ type: "CONTENT_READY", version: CONTENT_VERSION, url: location.href }).catch(() => {});
@@ -537,8 +548,12 @@
       observer.disconnect();
       return;
     }
-    if (busy) return;
+    if (busy) {
+      pendingAdvance = true;
+      return;
+    }
     busy = true;
+    let watchForProgress = false;
     try {
       if (!findManualConsentControl({ modalOnly: true })) hideConsentNotice();
       const stage = detectStage();
@@ -547,6 +562,7 @@
       publishStage(stage);
       const { reservation } = await chrome.storage.local.get("reservation");
       if (!reservation?.enabled) return;
+      watchForProgress = true;
       const helperUrl = new URLSearchParams(location.search).has("inline_helper");
       const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
       const flowPath = /\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname);
@@ -556,6 +572,7 @@
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
       }
       if (state.detailsReached && !detailsVisible) {
+        watchForProgress = false;
         report("流程中斷", "已進入資料頁，現在卻回到選位頁；助手已停止重新找日期，請檢查目前頁面", "error");
         return;
       }
@@ -662,7 +679,11 @@
       }
       if (adultPicker && (selectedTimeIsValid || state.timeSelectedAt)) {
         const bookingButton = exactButton("填寫訂位資料", "下一步");
-        if (bookingButton && !state.bookingButtonClickedAt) {
+        if (bookingButton && !bookingButton.disabled &&
+            (!state.bookingButtonClickedAt || (selectedTimeIsValid &&
+              Date.now() - state.bookingButtonClickedAt >= 1500 &&
+              Number(state.bookingButtonAttempts || 1) < 3))) {
+          state.bookingButtonAttempts = Number(state.bookingButtonAttempts || (state.bookingButtonClickedAt ? 1 : 0)) + 1;
           state.timeSelectedAt ||= Date.now();
           state.bookingButtonClickedAt = Date.now();
           sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
@@ -673,6 +694,12 @@
       }
 
       if (state.timeSelectedAt && !detailsVisible) {
+        if (Date.now() - state.timeSelectedAt >= 15000) {
+          watchForProgress = false;
+          await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+          report("資料頁未開啟", "inline 在選時段後 15 秒仍未開啟資料頁；請檢查時段是否已選取、下一步是否可按，或頁面是否有錯誤提示，再從外掛繼續。", "error");
+          return;
+        }
         report("等待資料頁", "已選擇符合條件的時段，正在等待 inline 開啟資料頁；不會重新找日期");
         return;
       }
@@ -742,9 +769,16 @@
       }
       report("等待頁面", "資料已填妥，等待 inline 顯示下一步；外掛不會自動付款或送出訂位");
     } catch (error) {
+      watchForProgress = false;
       report("發生錯誤", `訂位頁處理失敗：${error?.message || "頁面流程無法繼續"}`, "error");
     } finally {
       busy = false;
+      if (pendingAdvance) {
+        pendingAdvance = false;
+        scheduleAdvance();
+      } else if (watchForProgress) {
+        scheduleAdvance(1000);
+      }
     }
   }
 
@@ -760,10 +794,12 @@
 
   const observer = new MutationObserver((records = []) => {
     if (records.length && records.every(isHelperMutation)) return;
-    clearTimeout(observer.timer);
-    observer.timer = setTimeout(advance, FAST_STEP_MS);
+    scheduleAdvance();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  document.addEventListener?.("visibilitychange", () => {
+    if (document.visibilityState === "visible") scheduleAdvance();
+  });
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (document.documentElement.dataset.inlineHelperVersion !== CONTENT_VERSION) return false;
     if (message.type === "FILL_CONTACT_DETAILS") {
@@ -793,6 +829,20 @@
     return false;
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (document.documentElement.dataset.inlineHelperVersion !== CONTENT_VERSION) {
+      observer.disconnect();
+      return;
+    }
+    if (areaName === "local" && changes.reservation?.newValue?.enabled &&
+        !changes.reservation?.oldValue?.enabled) {
+      const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+      if (state.timeSelectedAt && !state.detailsReached) {
+        state.timeSelectedAt = Date.now();
+        delete state.bookingButtonClickedAt;
+        delete state.bookingButtonAttempts;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
+    }
     if (areaName === "local" && (changes.activeReservationTabId || changes.reservation)) advance();
   });
   advance();

@@ -133,11 +133,11 @@ async function testDateScanStopsAfterTimeOrDetails() {
     if (offerTime) {
       assert.equal(timeClicks, 1);
       observerCallback();
-      while (timers.length) { timers.shift()(); await new Promise(setImmediate); }
+      for (let step = 0; step < 4 && timers.length; step += 1) { timers.shift()(); await new Promise(setImmediate); }
       assert.equal(timeClicks, 1);
       assert.equal(redirects, 0);
     } else {
-      assert.equal(timers.length, 1);
+      assert.ok(timers.length >= 1);
       if (revealDetailsBeforeTimer) showDetails = true;
       timers.shift()();
       await new Promise(setImmediate);
@@ -146,6 +146,101 @@ async function testDateScanStopsAfterTimeOrDetails() {
   }
   await runScenario({ offerTime: true });
   await runScenario({ offerTime: false, revealDetailsBeforeTimer: true });
+}
+
+async function testWaitingFlowRecovers() {
+  let now = 10000;
+  let observerCallback;
+  let visibilityCallback;
+  let active = true;
+  let scopeRequests = 0;
+  let releaseScope;
+  let storageCallback;
+  let clicks = 0;
+  let reservation = { enabled: true, adults: 2, timeStart: "17:30", timeEnd: "18:00" };
+  const messages = [];
+  const timers = new Map();
+  const saved = new Map();
+  let timerId = 0;
+  const time = {
+    tagName: "BUTTON", textContent: "17:30", disabled: false,
+    classList: { contains: (name) => name === "selected" }, getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 100, height: 40 })
+  };
+  const next = { ...time, textContent: "填寫訂位資料", click: () => { clicks += 1; } };
+  const document = {
+    documentElement: { dataset: {} }, body: { innerText: "" }, visibilityState: "visible",
+    addEventListener: (_name, callback) => { visibilityCallback = callback; },
+    querySelector: (selector) => selector === "#adult-picker" ? { value: "2", options: [] } : null,
+    querySelectorAll: (selector) => selector === "button" || selector === 'button, [role="button"]' ? [time, next] : []
+  };
+  const chrome = {
+    runtime: {
+      sendMessage: async (message) => {
+        messages.push(message);
+        if (message.type !== "CHECK_FLOW_SCOPE") return {};
+        scopeRequests += 1;
+        if (scopeRequests === 1) return new Promise((resolve) => { releaseScope = resolve; });
+        return { active };
+      }, onMessage: { addListener() {} }
+    },
+    storage: { local: { get: async () => ({ reservation }), set: async (value) => { reservation = value.reservation; } }, onChanged: { addListener(callback) { storageCallback = callback; } } }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1", pathname: "/booking/-company/-branch" },
+    URLSearchParams, sessionStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
+    MutationObserver: class { constructor(callback) { observerCallback = callback; } observe() {} disconnect() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    Date: { now: () => now },
+    setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { callback, delay }); return id; },
+    clearTimeout: (id) => timers.delete(id)
+  });
+  const tick = async () => {
+    const [id, timer] = timers.entries().next().value;
+    timers.delete(id);
+    timer.callback();
+    await new Promise(setImmediate);
+  };
+  // Many site updates must retain one runnable check, even during an awaited scope request.
+  for (let i = 0; i < 20; i += 1) observerCallback();
+  assert.equal(timers.size, 1);
+  await tick();
+  assert.equal(scopeRequests, 1);
+  releaseScope({ active: true });
+  await new Promise(setImmediate);
+  assert.equal(clicks, 1, JSON.stringify(messages));
+  assert.equal(timers.size, 1, "An update arriving while busy must be replayed");
+  await tick();
+  assert.equal(scopeRequests, 2);
+  assert.equal(clicks, 1, "Do not double click while inline is transitioning");
+  now += 2000;
+  await tick();
+  assert.equal(clicks, 2, "Retry a selected slot when inline ignored the first next click");
+  now += 2000;
+  await tick();
+  assert.equal(clicks, 3);
+  now += 2000;
+  await tick();
+  assert.equal(clicks, 3, "Limit next-button attempts");
+  active = false;
+  await tick();
+  assert.equal(timers.size, 0);
+  active = true;
+  visibilityCallback();
+  await tick();
+  assert.equal(timers.size, 1, "Returning to the task tab must resume without a DOM change");
+  now = 26000;
+  await tick();
+  assert.equal(reservation.enabled, false);
+  assert.ok(messages.some((message) => message.status === "資料頁未開啟" && message.kind === "error"));
+  assert.equal(timers.size, 0, "A stalled transition must stop with an explanation");
+  const stoppedReservation = reservation;
+  reservation = { ...reservation, enabled: true };
+  storageCallback({ reservation: { oldValue: stoppedReservation, newValue: reservation } }, "local");
+  await new Promise(setImmediate);
+  assert.equal(clicks, 4, "Explicit resume must reset the transition timeout and retry budget");
+  assert.equal(reservation.enabled, true);
 }
 
 async function testTapPayRequiresManualCard() {
@@ -327,10 +422,11 @@ async function testDepositConsentDoesNotRecreateRulesNotice(payment) {
     setTimeout: (callback) => { timers.push(callback); return timers.length; }, clearTimeout() {}
   });
   await new Promise(setImmediate);
+  const scheduledBeforeHelperMutation = timers.length;
   for (let i = 0; i < 12; i += 1) {
     observerCallback([{ type: "childList", target: document.documentElement, addedNodes: [{ id: "inline-helper-consent-notice" }], removedNodes: [] }]);
   }
-  assert.equal(timers.length, 0, "Helper mutations must not schedule the flow again");
+  assert.equal(timers.length, scheduledBeforeHelperMutation, "Helper mutations must not schedule the flow again");
   for (let i = 0; i < 12; i += 1) {
     observerCallback([{ type: "childList", target: {}, addedNodes: [{ id: "site-content" }], removedNodes: [] }]);
     timers.shift()();
@@ -530,6 +626,7 @@ Promise.all([
   testContactFill("使用者自己填的姓名", "使用者自己填的姓名"),
   testContactFill("", "測試姓名", false),
   testDateScanStopsAfterTimeOrDetails(),
+  testWaitingFlowRecovers(),
   testTapPayRequiresManualCard(),
   testOldConsentNoticeClearsAfterTaskStops(),
   testDepositConsentDoesNotRecreateRulesNotice(true),
