@@ -153,6 +153,12 @@
     return checked === true || ariaChecked === "true" || ariaPressed === "true" || dataState === "checked";
   }
 
+  function consentControlShouldAct({ isLabel, targetIsSelf, targetVisible, required } = {}) {
+    if (isLabel && targetIsSelf) return false;
+    if (!targetVisible && !required) return false;
+    return true;
+  }
+
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
     setUrlQueryParams,
@@ -167,6 +173,7 @@
     finalSubmitAction,
     isAutoConsentText,
     splitContactName,
-    controlStateIsSelected
+    controlStateIsSelected,
+    consentControlShouldAct
   };
 })();

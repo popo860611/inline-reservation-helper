@@ -30,7 +30,7 @@
         <span class="update-dot" aria-hidden="true"></span>
         <span class="update-copy"><strong>GitHub 版本（手動）</strong><span id="update-mode">尚未手動檢查</span><span id="page-runtime-version">頁面助手：尚未偵測</span></span>
         <button id="apply-update" class="update-button" type="button">檢查更新</button>
-        <span id="extension-version" class="version-pill">v0.3.25</span>
+        <span id="extension-version" class="version-pill">v0.3.26</span>
       </section>
 
       <form id="reservation-form">
@@ -79,6 +79,10 @@
             </select>
           </label>
           <p class="helper">桌型／餐區會優先選第一個可用選項；若餐廳有其他未知必填題，助手會停下並指出題目。</p>
+          <div class="save-settings-row">
+            <button id="save-settings" type="button">儲存設定</button>
+            <span id="save-settings-status" role="status" aria-live="polite">尚未儲存</span>
+          </div>
         </section>
 
         <details>

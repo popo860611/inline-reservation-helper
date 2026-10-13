@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName, controlStateIsSelected } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName, controlStateIsSelected, consentControlShouldAct } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -64,6 +64,10 @@ assert.deepEqual(splitContactName("王 小明"), { familyName: "王", givenName:
 assert.equal(controlStateIsSelected({ ariaChecked: "true" }), true);
 assert.equal(controlStateIsSelected({ dataState: "checked" }), true);
 assert.equal(controlStateIsSelected({ checked: false, ariaChecked: "false" }), false);
+assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: true, targetVisible: true, required: false }), false);
+assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: false, targetVisible: false, required: false }), false);
+assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: false, targetVisible: true, required: false }), true);
+assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: false, targetVisible: false, required: true }), true);
 assert.equal(restaurantMatchScore("辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", "辛殿信義店"), 1);
 assert.equal(selectRestaurantMatch([
   { name: "辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", bookingLink: bookingUrl },
@@ -98,6 +102,11 @@ assert.match(popup, /reloadInlineAfterExtensionRestart: true/);
 assert.ok(popup.indexOf("reloadInlineAfterExtensionRestart: true") < popup.indexOf("chrome.runtime.reload()"));
 assert.match(popupHtml, /id="reload-card"[^>]*hidden/);
 assert.match(popupHtml, /id="reload-extension"[^>]*>套用插件更新<\/button>/);
+assert.match(popupHtml, /id="save-settings"[^>]*>儲存設定<\/button>/);
+assert.match(popupHtml, /id="save-settings-status"/);
+assert.match(popup, /saveSettingsButton\.addEventListener\("click"/);
+assert.match(popup, /設定已儲存/);
+assert.match(popup, /有尚未儲存的變更/);
 assert.match(popup, /window\.addEventListener\("pageshow", renderInitialUpdateStatus\)/);
 assert.match(popup, /document\.visibilityState === "visible"/);
 assert.match(popup, /!event\.isTrusted/);
@@ -194,11 +203,13 @@ assert.match(content, /訂位資料已自動填妥；信用卡、OTP 或付款�
 assert.match(content, /function acceptManualConsent\(control\)/);
 assert.match(content, /function interactiveControl\(control\)/);
 assert.match(content, /function controlIsSelected\(control\)/);
+assert.match(content, /function consentControlIsActionable\(control\)/);
+assert.match(content, /InlineHelperCommon\.consentControlShouldAct/);
 assert.match(content, /if \(controlIsSelected\(target\)\) return false/);
 assert.match(content, /target\.click\(\);[\s\S]*已同意條款/);
 assert.match(content, /scrollable\.scrollTop = scrollable\.scrollHeight/);
 assert.ok(content.indexOf("acceptManualConsent(manualConsentControl)") < content.indexOf("const paymentAuthorizationButton = findPaymentAuthorizationButton()"));
-assert.match(content, /const CONTENT_VERSION = "0\.3\.25"/);
+assert.match(content, /const CONTENT_VERSION = "0\.3\.26"/);
 assert.match(content, /dataset\.inlineHelperVersion === CONTENT_VERSION\) return/);
 assert.match(content, /dataset\.inlineHelperVersion = CONTENT_VERSION/);
 assert.match(content, /type: "CONTENT_READY"/);

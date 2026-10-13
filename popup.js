@@ -21,10 +21,12 @@ const updateButton = document.querySelector("#apply-update");
 const reloadCard = document.querySelector("#reload-card");
 const backgroundVersionDetail = document.querySelector("#background-version-detail");
 const pageRuntimeVersion = document.querySelector("#page-runtime-version");
+const saveSettingsButton = document.querySelector("#save-settings");
+const saveSettingsStatus = document.querySelector("#save-settings-status");
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.25";
+const BUILD_VERSION = "0.3.26";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -57,6 +59,11 @@ function renderRunMode() {
   modeToggle.textContent = liveMode.checked ? "實際｜自動確認" : "預演｜不送出";
   modeToggle.classList.toggle("live", liveMode.checked);
   modeToggle.setAttribute("aria-pressed", String(liveMode.checked));
+}
+
+function renderSettingsStatus(message, kind = "") {
+  saveSettingsStatus.textContent = message;
+  saveSettingsStatus.className = kind;
 }
 
 async function checkBackgroundVersion() {
@@ -158,12 +165,21 @@ modeToggle.addEventListener("click", async () => {
   const updates = { selectedRunMode: liveMode.checked ? "live" : "preview" };
   if (reservation) updates.reservation = { ...reservation, autoSubmit: liveMode.checked };
   await chrome.storage.local.set(updates);
+  renderSettingsStatus("模式設定已儲存", "saved");
   setStatus(
     liveMode.checked
       ? "已切換為實際模式；條款與金額會自動確認，只有需要填卡、OTP 或 CAPTCHA 時才會停止。"
       : "已切換為預演模式；只找位與填寫，不會送出最終訂位。",
     liveMode.checked ? "error" : "ok"
   );
+});
+
+document.querySelector("#reservation-form").addEventListener("input", () => {
+  renderSettingsStatus("有尚未儲存的變更", "dirty");
+});
+
+document.querySelector("#reservation-form").addEventListener("change", () => {
+  renderSettingsStatus("有尚未儲存的變更", "dirty");
 });
 
 window.addEventListener("pageshow", renderInitialUpdateStatus);
@@ -240,6 +256,9 @@ async function restore() {
         else field.value = reservation[key];
       }
     }
+    renderSettingsStatus("已載入上次儲存設定", "saved");
+  } else {
+    renderSettingsStatus("尚未儲存");
   }
   const alarm = await chrome.alarms.get("inline-reservation-open");
   if (flowStatus) setStatus(
@@ -251,10 +270,29 @@ async function restore() {
   else setStatus("填妥三個區塊後，即可開始找位。");
 }
 
+saveSettingsButton.addEventListener("click", async () => {
+  try {
+    const reservation = { ...readReservation(), enabled: false };
+    validate(reservation);
+    await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"]);
+    await chrome.storage.local.set({
+      reservation,
+      selectedRunMode: reservation.autoSubmit ? "live" : "preview",
+      settingsSavedAt: Date.now()
+    });
+    renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
+    setStatus("設定已儲存在這台瀏覽器；尚未開始找位。", "ok");
+  } catch (error) {
+    renderSettingsStatus("儲存失敗", "dirty");
+    setStatus(error.message, "error");
+  }
+});
+
 document.querySelector("#schedule").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
     await save(reservation, true);
+    renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const when = new Date(reservation.releaseAt).getTime();
     if (!Number.isFinite(when) || when <= Date.now()) throw new Error("啟動時間必須晚於現在。");
     const response = await chrome.runtime.sendMessage({ type: "SCHEDULE", when, prepWhen: when - reservation.prepMinutes * 60000 });
@@ -267,6 +305,7 @@ document.querySelector("#open-now").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
     await save(reservation);
+    renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
     const modeText = reservation.autoSubmit

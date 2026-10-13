@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.25";
+  const CONTENT_VERSION = "0.3.26";
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
   let busy = false;
 
@@ -321,7 +321,7 @@
 
   function findManualConsentControl() {
     return [...document.querySelectorAll('button, [role="button"], [role="checkbox"], label')].find((element) =>
-      visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent)
+      visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent) && consentControlIsActionable(element)
     ) || null;
   }
 
@@ -338,6 +338,18 @@
       ariaChecked: target?.getAttribute?.("aria-checked"),
       ariaPressed: target?.getAttribute?.("aria-pressed"),
       dataState: target?.getAttribute?.("data-state")
+    });
+  }
+
+  function consentControlIsActionable(control) {
+    const target = interactiveControl(control);
+    if (!target) return false;
+    const required = target.required === true || target.getAttribute?.("aria-required") === "true";
+    return InlineHelperCommon.consentControlShouldAct({
+      isLabel: control.tagName === "LABEL",
+      targetIsSelf: target === control,
+      targetVisible: visible(target),
+      required
     });
   }
 
