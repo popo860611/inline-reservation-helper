@@ -1,6 +1,8 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.26";
+  const CONTENT_VERSION = "0.3.27";
+  const FAST_STEP_MS = 80;
+  const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
   let busy = false;
 
@@ -319,9 +321,11 @@
     return true;
   }
 
-  function findManualConsentControl() {
+  function findManualConsentControl({ modalOnly = false } = {}) {
     return [...document.querySelectorAll('button, [role="button"], [role="checkbox"], label')].find((element) =>
-      visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent) && consentControlIsActionable(element)
+      visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent) &&
+      consentControlIsActionable(element) &&
+      (!modalOnly || Boolean(element.closest('[role="dialog"], [aria-modal="true"]')))
     ) || null;
   }
 
@@ -368,7 +372,7 @@
         scrollable.dispatchEvent(new Event("scroll", { bubbles: true }));
       }
       report("閱讀條款", "正在捲到規則與注意事項底部，完成後會自動同意");
-      setTimeout(advance, 400);
+      setTimeout(advance, NAVIGATION_STEP_MS);
       return true;
     }
     target.click();
@@ -429,12 +433,8 @@
         return;
       }
       hideCaptchaNotice();
-      const manualConsentControl = findManualConsentControl();
-      if (manualConsentControl && state.authorizationStepAttemptedAt) {
-        delete state.authorizationStepAttemptedAt;
-        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-      }
-      if (acceptManualConsent(manualConsentControl)) return;
+      const modalConsentControl = findManualConsentControl({ modalOnly: true });
+      if (acceptManualConsent(modalConsentControl)) return;
       if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
         navigateToDate(reservation, reservation.dateStart);
         return;
@@ -469,7 +469,7 @@
           if (following <= reservation.dateEnd) {
             await chrome.storage.local.set({ lastSelectedDate: following });
             report("下一天", `${lastSelectedDate} 無法選擇，接著檢查 ${following}`);
-            setTimeout(advance, 250);
+            setTimeout(advance, FAST_STEP_MS);
           } else {
             await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
             report("沒有日期", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有可選日期`, "error");
@@ -498,7 +498,7 @@
           sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
           if (following <= reservation.dateEnd && scanCount < 14) {
             report("下一天", `${current} 沒有區間內時段，接著檢查 ${following}`);
-            setTimeout(() => navigateToDate(reservation, following), 800);
+            setTimeout(() => navigateToDate(reservation, following), NAVIGATION_STEP_MS);
           } else {
             await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
             report("沒有空位", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有找到 ${reservation.timeStart}–${reservation.timeEnd}`, "error");
@@ -508,6 +508,12 @@
       }
 
       if (adultPicker && selectedTimeIsValid) {
+        const skipPreorderButton = exactButton("跳過預先點餐", "跳過預點餐", "略過預先點餐");
+        if (skipPreorderButton) {
+          report("跳過點餐", "此時段提供預先點餐，已選擇跳過並繼續訂位");
+          skipPreorderButton.click();
+          return;
+        }
         const bookingButton = exactButton("完成預訂", "填寫訂位資料", "下一步");
         if (bookingButton) {
           report("下一步", "正在進入訂位資料頁");
@@ -526,6 +532,13 @@
         report("已填寫", "姓名、手機與 Email 已填入訂位資料頁");
         return;
       }
+
+      const manualConsentControl = findManualConsentControl();
+      if (manualConsentControl && state.authorizationStepAttemptedAt) {
+        delete state.authorizationStepAttemptedAt;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
+      if (acceptManualConsent(manualConsentControl)) return;
 
       if (hasInteractivePaymentStep()) {
         report("需填信用卡", "訂位資料已自動填妥；信用卡、OTP 或付款驗證請由你手動完成", "error");
@@ -594,7 +607,7 @@
 
   const observer = new MutationObserver(() => {
     clearTimeout(observer.timer);
-    observer.timer = setTimeout(advance, 250);
+    observer.timer = setTimeout(advance, FAST_STEP_MS);
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
   chrome.storage.onChanged.addListener((changes, areaName) => {
