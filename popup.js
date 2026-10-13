@@ -23,7 +23,7 @@ const backgroundVersionDetail = document.querySelector("#background-version-deta
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.19";
+const BUILD_VERSION = "0.3.20";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 

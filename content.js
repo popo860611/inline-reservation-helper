@@ -385,31 +385,6 @@
       }
       const manualConsentControl = findManualConsentControl();
       if (acceptManualConsent(manualConsentControl)) return;
-      const paymentAuthorizationButton = findPaymentAuthorizationButton();
-      if (paymentAuthorizationButton) {
-        const authorizationAction = InlineHelperCommon.authorizationAction({
-          autoSubmit: reservation.autoSubmit,
-          submitAttemptedAt: state.submitAttemptedAt
-        });
-        if (authorizationAction === "preview") {
-          await chrome.storage.local.set({
-            reservation: { ...reservation, enabled: false },
-            previewCompletedAt: Date.now()
-          });
-          showPreviewComplete();
-          report("預演完成", "已到信用卡授權與確認訂位前；預演模式沒有送出訂位");
-          return;
-        }
-        if (authorizationAction === "wait") {
-          report("請確認", "已按過信用卡授權與確認訂位，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
-          return;
-        }
-        state.submitAttemptedAt = Date.now();
-        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-        report("確認中", "條款與金額已處理，正在授權信用卡並確認訂位");
-        paymentAuthorizationButton.click();
-        return;
-      }
       if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
         navigateToDate(reservation, reservation.dateStart);
         return;
@@ -507,6 +482,32 @@
       }
       if (!reservation.contactName || !reservation.contactPhone) {
         report("缺資料", "請先在插件填入姓名與手機", "error");
+        return;
+      }
+
+      const paymentAuthorizationButton = findPaymentAuthorizationButton();
+      if (paymentAuthorizationButton) {
+        const authorizationAction = InlineHelperCommon.authorizationAction({
+          autoSubmit: reservation.autoSubmit,
+          submitAttemptedAt: state.submitAttemptedAt
+        });
+        if (authorizationAction === "preview") {
+          await chrome.storage.local.set({
+            reservation: { ...reservation, enabled: false },
+            previewCompletedAt: Date.now()
+          });
+          showPreviewComplete();
+          report("預演完成", "已到信用卡授權與確認訂位前；預演模式沒有送出訂位");
+          return;
+        }
+        if (authorizationAction === "wait") {
+          report("請確認", "已按過信用卡授權與確認訂位，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
+          return;
+        }
+        state.submitAttemptedAt = Date.now();
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+        report("確認中", "條款與金額已處理，正在授權信用卡並確認訂位");
+        paymentAuthorizationButton.click();
         return;
       }
 
