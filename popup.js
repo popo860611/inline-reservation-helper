@@ -26,7 +26,13 @@ const saveSettingsStatus = document.querySelector("#save-settings-status");
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.30";
+const paymentAutofill = document.querySelector("#payment-autofill");
+const paymentFields = document.querySelector("#payment-fields");
+const cardholderName = document.querySelector("#cardholder-name");
+const cardNumber = document.querySelector("#card-number");
+const cardExpiry = document.querySelector("#card-expiry");
+const cardSecurityCode = document.querySelector("#card-security-code");
+const BUILD_VERSION = "0.3.31";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -176,12 +182,34 @@ modeToggle.addEventListener("click", async () => {
   );
 });
 
-document.querySelector("#reservation-form").addEventListener("input", () => {
+document.querySelector("#reservation-form").addEventListener("input", (event) => {
+  if (event.target.closest(".payment-details")) return;
   renderSettingsStatus("有尚未儲存的變更", "dirty");
 });
 
-document.querySelector("#reservation-form").addEventListener("change", () => {
+document.querySelector("#reservation-form").addEventListener("change", (event) => {
+  if (event.target.closest(".payment-details")) return;
   renderSettingsStatus("有尚未儲存的變更", "dirty");
+});
+
+paymentAutofill.addEventListener("change", () => {
+  paymentFields.hidden = !paymentAutofill.checked;
+  if (paymentAutofill.checked && !cardholderName.value.trim()) cardholderName.value = fields.contactName.value.trim();
+  if (!paymentAutofill.checked) clearPaymentInputs();
+});
+
+cardNumber.addEventListener("input", () => {
+  const digits = cardNumber.value.replace(/\D/g, "").slice(0, 19);
+  cardNumber.value = digits.replace(/(.{4})/g, "$1 ").trim();
+});
+
+cardExpiry.addEventListener("input", () => {
+  const digits = cardExpiry.value.replace(/\D/g, "").slice(0, 4);
+  cardExpiry.value = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
+});
+
+cardSecurityCode.addEventListener("input", () => {
+  cardSecurityCode.value = cardSecurityCode.value.replace(/\D/g, "").slice(0, 4);
 });
 
 window.addEventListener("pageshow", renderInitialUpdateStatus);
@@ -209,6 +237,40 @@ function readReservation() {
     language: "zh",
     enabled: true
   };
+}
+
+function clearPaymentInputs() {
+  cardholderName.value = "";
+  cardNumber.value = "";
+  cardExpiry.value = "";
+  cardSecurityCode.value = "";
+}
+
+function readPaymentAutofill(reservation, scheduling = false) {
+  if (!paymentAutofill.checked) return null;
+  const number = cardNumber.value.replace(/\D/g, "");
+  const expiry = cardExpiry.value.replace(/\D/g, "");
+  const securityCode = cardSecurityCode.value.replace(/\D/g, "");
+  const holder = cardholderName.value.trim() || reservation.contactName;
+  if (!/^\d{13,19}$/.test(number)) throw new Error("信用卡號需為 13 到 19 位數字。");
+  if (!/^(0[1-9]|1[0-2])\d{2}$/.test(expiry)) throw new Error("到期日請使用 MM/YY 格式。");
+  if (!/^\d{3,4}$/.test(securityCode)) throw new Error("安全碼需為 3 或 4 位數字。");
+  const releaseTime = scheduling && reservation.releaseAt ? new Date(reservation.releaseAt).getTime() : Date.now();
+  return {
+    cardholderName: holder,
+    cardNumber: number,
+    expiry,
+    securityCode,
+    expiresAt: Math.max(Date.now() + 30 * 60_000, releaseTime + 60 * 60_000),
+    createdAt: Date.now()
+  };
+}
+
+async function savePaymentAutofill(reservation, scheduling = false) {
+  const payment = readPaymentAutofill(reservation, scheduling);
+  await chrome.storage.session.remove("paymentAutofillResult");
+  if (payment) await chrome.storage.session.set({ paymentAutofillSession: payment });
+  else await chrome.storage.session.remove("paymentAutofillSession");
 }
 
 function isInlineUrl(value) {
@@ -293,6 +355,8 @@ saveSettingsButton.addEventListener("click", async () => {
 document.querySelector("#schedule").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
+    validate(reservation, true);
+    await savePaymentAutofill(reservation, true);
     await save(reservation, true);
     renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const when = new Date(reservation.releaseAt).getTime();
@@ -306,12 +370,14 @@ document.querySelector("#schedule").addEventListener("click", async () => {
 document.querySelector("#open-now").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
+    validate(reservation);
+    await savePaymentAutofill(reservation);
     await save(reservation);
     renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
     const modeText = reservation.autoSubmit
-      ? "實際模式：條款與金額會自動確認；需要填卡、OTP 或 CAPTCHA 時才會停止。"
+      ? `實際模式：條款與金額會自動確認；${paymentAutofill.checked ? "信用卡會使用本次暫存資料代填；" : "需要填卡時會停止；"}OTP 或 CAPTCHA 仍需手動。`
       : "模擬模式：只找位與填寫，會停在最後送出前。";
     const searchText = response.mode === "url"
       ? "已忽略排程時間，立即開始尋找可用時段。"
@@ -322,6 +388,10 @@ document.querySelector("#open-now").addEventListener("click", async () => {
 
 document.querySelector("#cancel").addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "CANCEL" });
+  await chrome.storage.session.remove("paymentAutofillSession");
+  paymentAutofill.checked = false;
+  paymentFields.hidden = true;
+  clearPaymentInputs();
   const { reservation } = await chrome.storage.local.get("reservation");
   if (reservation) await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "排程已取消" });
   setStatus("排程已取消。");

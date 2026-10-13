@@ -221,6 +221,14 @@ details {
 summary { padding: 11px 12px; color: #405047; font-size: 12px; font-weight: 750; cursor: pointer; }
 .details-body { display: grid; gap: 10px; padding: 0 12px 12px; }
 
+.payment-details {
+  border-color: #e1c994;
+  background: rgba(255, 249, 232, 0.72);
+}
+
+.payment-fields { display: grid; gap: 10px; }
+.payment-privacy { margin: 0; color: #6d561e; font-size: 10px; line-height: 1.5; }
+
 fieldset {
   display: grid;
   gap: 8px;

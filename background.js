@@ -3,6 +3,52 @@ const PREP_ALARM_NAME = "inline-reservation-prepare";
 const FLOW_SCOPE_MIGRATION = "0.3.12";
 const RELOAD_INLINE_AFTER_RESTART = "reloadInlineAfterExtensionRestart";
 importScripts("common.js");
+let paymentSessionQueue = Promise.resolve();
+
+function senderMatchesActiveFlow(sender, activeReservationTabId, flowLeaseUntil) {
+  return Number.isInteger(sender.tab?.id) && sender.tab.id === activeReservationTabId && Number(flowLeaseUntil || 0) > Date.now();
+}
+
+function paymentFieldFromSenderUrl(value) {
+  let decoded = String(value || "");
+  try { decoded = decodeURIComponent(decoded); } catch (_error) {}
+  if (/"type"\s*:\s*"card-number"/.test(decoded)) return "cardNumber";
+  if (/"type"\s*:\s*"expiration-date"/.test(decoded)) return "expiry";
+  if (/"type"\s*:\s*"ccv"/.test(decoded)) return "securityCode";
+  return null;
+}
+
+async function readActivePaymentSession(sender) {
+  const [{ activeReservationTabId, flowLeaseUntil }, { paymentAutofillSession }, { paymentAutofillResult }] = await Promise.all([
+    chrome.storage.local.get(["activeReservationTabId", "flowLeaseUntil"]),
+    chrome.storage.session.get("paymentAutofillSession"),
+    chrome.storage.session.get("paymentAutofillResult")
+  ]);
+  if (!senderMatchesActiveFlow(sender, activeReservationTabId, flowLeaseUntil)) return { active: false, completed: false };
+  if (paymentAutofillResult?.tabId === sender.tab.id) return { active: false, completed: true };
+  if (!paymentAutofillSession || Number(paymentAutofillSession.expiresAt || 0) <= Date.now()) {
+    await chrome.storage.session.remove("paymentAutofillSession");
+    return { active: false, completed: false };
+  }
+  return { active: true, completed: false, session: paymentAutofillSession };
+}
+
+function clearPaymentField(field, sender) {
+  paymentSessionQueue = paymentSessionQueue.then(async () => {
+    const state = await readActivePaymentSession(sender);
+    if (!state.active || !state.session || !(field in state.session)) return;
+    const next = { ...state.session };
+    delete next[field];
+    const remaining = ["cardholderName", "cardNumber", "expiry", "securityCode"].some((key) => Boolean(next[key]));
+    if (remaining) {
+      await chrome.storage.session.set({ paymentAutofillSession: next });
+    } else {
+      await chrome.storage.session.remove("paymentAutofillSession");
+      await chrome.storage.session.set({ paymentAutofillResult: { tabId: sender.tab.id, completedAt: Date.now() } });
+    }
+  });
+  return paymentSessionQueue;
+}
 
 async function migrateUnsafeGlobalFlow() {
   const { flowScopeMigration, reservation } = await chrome.storage.local.get([
@@ -32,6 +78,7 @@ async function reloadActiveReservationTabAfterUpdate() {
     const results = await Promise.allSettled(injectableTabs.map(async (tab) => {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js"] });
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["payment-frame.js"] });
     }));
     const failedTabs = injectableTabs.filter((_tab, index) => results[index].status === "rejected");
     await Promise.allSettled(failedTabs.map((tab) => chrome.tabs.reload(tab.id)));
@@ -195,6 +242,52 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "PAYMENT_AUTOFILL_STATUS") {
+    readActivePaymentSession(_sender)
+      .then(({ active, completed }) => sendResponse({ ok: true, active, completed }))
+      .catch(() => sendResponse({ ok: false, active: false, completed: false }));
+    return true;
+  }
+
+  if (message.type === "REQUEST_PAYMENT_CARDHOLDER") {
+    readActivePaymentSession(_sender).then((state) => {
+      const senderUrl = String(_sender.url || _sender.tab?.url || "");
+      const allowed = senderUrl.startsWith("https://inline.app/booking/");
+      sendResponse({ ok: allowed && state.active, value: allowed && state.active ? state.session.cardholderName || "" : "" });
+    }).catch(() => sendResponse({ ok: false, value: "" }));
+    return true;
+  }
+
+  if (message.type === "REQUEST_PAYMENT_FIELD") {
+    readActivePaymentSession(_sender).then((state) => {
+      const field = paymentFieldFromSenderUrl(_sender.url);
+      const allowed = String(_sender.url || "").startsWith("https://js.tappaysdk.com/") && field;
+      sendResponse({ ok: Boolean(allowed && state.active), field, value: allowed && state.active ? state.session[field] || "" : "" });
+    }).catch(() => sendResponse({ ok: false, value: "" }));
+    return true;
+  }
+
+  if (message.type === "PAYMENT_FIELD_FILLED") {
+    const inferredField = paymentFieldFromSenderUrl(_sender.url);
+    const field = message.field === "cardholderName" ? "cardholderName" : inferredField;
+    const senderUrl = String(_sender.url || _sender.tab?.url || "");
+    const allowed = field === "cardholderName"
+      ? senderUrl.startsWith("https://inline.app/booking/")
+      : senderUrl.startsWith("https://js.tappaysdk.com/") && message.field === inferredField;
+    if (!allowed) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    clearPaymentField(field, _sender).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message.type === "CLEAR_PAYMENT_AUTOFILL") {
+    chrome.storage.session.remove(["paymentAutofillSession", "paymentAutofillResult"])
+      .then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (message.type === "CONTENT_READY") {
     chrome.storage.local.set({
       loadedPageHelperVersion: String(message.version || "未知"),
@@ -287,7 +380,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     Promise.all([
       chrome.alarms.clear(ALARM_NAME),
       chrome.alarms.clear(PREP_ALARM_NAME),
-      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch", "flowLeaseUntil"])
+      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch", "flowLeaseUntil"]),
+      chrome.storage.session.remove(["paymentAutofillSession", "paymentAutofillResult"])
     ]).then(() => sendResponse({ ok: true }));
     return true;
   }

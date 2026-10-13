@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.30";
+  const CONTENT_VERSION = "0.3.31";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -103,7 +103,7 @@
     const control = document.querySelector([
       'input[autocomplete^="cc-"]', 'input[name*="card" i]', 'input[id*="card" i]',
       'input[autocomplete="one-time-code"]', 'input[name*="otp" i]', 'input[id*="otp" i]',
-      'iframe[src*="stripe" i]', 'iframe[src*="payment" i]', 'iframe[src*="3ds" i]'
+      'iframe[src*="stripe" i]', 'iframe[src*="payment" i]', 'iframe[src*="tappaysdk.com" i]', 'iframe[src*="3ds" i]'
     ].join(","));
     return Boolean(control && visible(control));
   }
@@ -186,6 +186,21 @@
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(value) }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
     element.blur();
+  }
+
+  async function fillPaymentCardholder() {
+    const input = document.querySelector('#cardholder-name, input[autocomplete="cc-name"]');
+    if (!input || !visible(input)) return false;
+    const response = await chrome.runtime.sendMessage({ type: "REQUEST_PAYMENT_CARDHOLDER" });
+    if (!response?.ok || !response.value) return false;
+    const expected = String(response.value).trim();
+    if (String(input.value || "").trim() !== expected) {
+      setNativeValue(input, expected);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    if (String(input.value || "").trim() !== expected) return false;
+    await chrome.runtime.sendMessage({ type: "PAYMENT_FIELD_FILLED", field: "cardholderName" });
+    return true;
   }
 
   function fillInput(selectors, value) {
@@ -502,6 +517,7 @@
 
       if (isSuccessPage()) {
         await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowLeaseUntil: 0, flowStatus: "訂位完成" });
+        await chrome.runtime.sendMessage({ type: "CLEAR_PAYMENT_AUTOFILL" });
         report("完成", "inline 已顯示訂位成功");
         return;
       }
@@ -638,8 +654,28 @@
       if (acceptManualConsent(manualConsentControl)) return;
 
       if (hasInteractivePaymentStep()) {
-        report("需填信用卡", "訂位資料已自動填妥；信用卡、OTP 或付款驗證請由你手動完成", "error");
-        return;
+        const payment = await chrome.runtime.sendMessage({ type: "PAYMENT_AUTOFILL_STATUS" });
+        if (payment?.active) {
+          await fillPaymentCardholder();
+          report("代填信用卡", "正在逐欄填入本次暫存的信用卡資料；填入後即刪除暫存值");
+          setTimeout(advance, 180);
+          return;
+        }
+        if (!payment?.completed) {
+          report("需填信用卡", "未提供本次信用卡代填資料；請手動填寫，OTP 或付款驗證仍由你完成", "error");
+          return;
+        }
+        if (!reservation.autoSubmit) {
+          await chrome.storage.local.set({
+            reservation: { ...reservation, enabled: false },
+            flowLeaseUntil: 0,
+            previewCompletedAt: Date.now()
+          });
+          showPreviewComplete();
+          report("預演完成", "信用卡資料已代填；預演模式沒有按下信用卡授權或送出訂位");
+          return;
+        }
+        report("信用卡已填", "信用卡資料已代填並從暫存刪除；正在繼續，OTP 仍需手動");
       }
 
       const missing = unansweredRequired();
