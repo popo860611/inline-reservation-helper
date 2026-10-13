@@ -1,6 +1,7 @@
 const ALARM_NAME = "inline-reservation-open";
 const PREP_ALARM_NAME = "inline-reservation-prepare";
 const FLOW_SCOPE_MIGRATION = "0.3.12";
+const RELOAD_INLINE_AFTER_RESTART = "reloadInlineAfterExtensionRestart";
 importScripts("common.js");
 
 async function migrateUnsafeGlobalFlow() {
@@ -19,6 +20,24 @@ async function migrateUnsafeGlobalFlow() {
 }
 
 const flowScopeMigrationReady = migrateUnsafeGlobalFlow();
+
+async function reloadActiveReservationTabAfterUpdate() {
+  await flowScopeMigrationReady;
+  const stored = await chrome.storage.local.get([
+    RELOAD_INLINE_AFTER_RESTART, "activeReservationTabId", "lastOpenedUrl", "reservation"
+  ]);
+  if (!stored[RELOAD_INLINE_AFTER_RESTART]) return;
+  await chrome.storage.local.remove(RELOAD_INLINE_AFTER_RESTART);
+  try {
+    const tabs = await chrome.tabs.query({ url: ["https://inline.app/booking/*"] });
+    const matchingTabIds = InlineHelperCommon.matchingBookingTabIds(
+      tabs, stored.lastOpenedUrl || stored.reservation?.restaurantQuery
+    );
+    await Promise.all(matchingTabIds.map((tabId) => chrome.tabs.reload(tabId)));
+  } catch (_error) {}
+}
+
+const extensionReady = reloadActiveReservationTabAfterUpdate();
 
 function utf8ToBase64(value) {
   const bytes = new TextEncoder().encode(value);
@@ -169,8 +188,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "CHECK_FLOW_SCOPE") {
-    flowScopeMigrationReady.then(() => chrome.storage.local.get("activeReservationTabId")).then(({ activeReservationTabId }) => {
-      sendResponse({ active: Number.isInteger(_sender.tab?.id) && _sender.tab.id === activeReservationTabId });
+    extensionReady.then(() => chrome.storage.local.get([
+      "activeReservationTabId", "lastOpenedUrl", "reservation"
+    ])).then(async ({ activeReservationTabId, lastOpenedUrl, reservation }) => {
+      const senderTabId = _sender.tab?.id;
+      let active = Number.isInteger(senderTabId) && senderTabId === activeReservationTabId;
+      const activeMatchingForm = Number.isInteger(senderTabId) && InlineHelperCommon.canAdoptFormScope({
+        senderUrl: _sender.tab?.url,
+        expectedUrl: lastOpenedUrl || reservation?.restaurantQuery,
+        senderActive: _sender.tab?.active,
+        reservationEnabled: reservation?.enabled
+      });
+      if (!active && reservation?.enabled && activeMatchingForm) {
+        active = true;
+        await chrome.storage.local.set({
+          activeReservationTabId: senderTabId,
+          flowStatus: "已接手目前顯示的訂位資料頁",
+          flowStatusKind: "ok"
+        });
+      }
+      sendResponse({ active });
     });
     return true;
   }

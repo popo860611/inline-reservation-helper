@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "inline 訂位快手",
-  "version": "0.3.22",
+  "version": "0.3.23",
   "description": "依餐廳、日期區間、時間區間與人數，自動尋找 inline 可用訂位。",
   "permissions": ["alarms", "storage"],
   "host_permissions": [
     "https://api.github.com/*",
-    "https://diner-network-api.inline.app/*"
+    "https://diner-network-api.inline.app/*",
+    "https://inline.app/*"
   ],
   "background": {
     "service_worker": "background.js"

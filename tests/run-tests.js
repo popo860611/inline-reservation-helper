@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -13,6 +13,31 @@ assert.equal(normalizeRestaurantInput(`inline.app/booking/-company/-branch`).kin
 assert.equal(normalizeRestaurantInput(`${bookingUrl}/form`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`-company/-branch/form`).value, bookingUrl);
 assert.equal(normalizeRestaurantInput(`/booking/-company/-branch/form`).value, bookingUrl);
+assert.equal(bookingIdentity(`${bookingUrl}/form`), "-company/-branch");
+assert.equal(bookingIdentity("https://inline.app/booking/-company/-other/form"), "-company/-other");
+assert.equal(bookingIdentity("https://example.com/booking/-company/-branch/form"), "");
+assert.equal(canAdoptFormScope({
+  senderUrl: `${bookingUrl}/form`, expectedUrl: bookingUrl,
+  senderActive: true, reservationEnabled: true
+}), true);
+assert.equal(canAdoptFormScope({
+  senderUrl: "https://inline.app/booking/-company/-other/form", expectedUrl: bookingUrl,
+  senderActive: true, reservationEnabled: true
+}), false);
+assert.equal(canAdoptFormScope({
+  senderUrl: `${bookingUrl}/form`, expectedUrl: bookingUrl,
+  senderActive: false, reservationEnabled: true
+}), false);
+assert.equal(canAdoptFormScope({
+  senderUrl: `${bookingUrl}/form`, expectedUrl: bookingUrl,
+  senderActive: true, reservationEnabled: false
+}), false);
+assert.deepEqual(matchingBookingTabIds([
+  { id: 11, url: `${bookingUrl}/form` },
+  { id: 12, url: `${bookingUrl}?inline_helper=1` },
+  { id: 13, url: "https://inline.app/booking/-company/-other/form" },
+  { id: "14", url: `${bookingUrl}/form` }
+], bookingUrl), [11, 12]);
 assert.equal(
   setUrlQueryParams(`${bookingUrl}/form?utm_source=test`, { inline_helper: "1", pre_filled_form: "abc+/=" }),
   `${bookingUrl}?utm_source=test&inline_helper=1&pre_filled_form=abc%2B%2F%3D`
@@ -66,7 +91,8 @@ assert.match(popup, /restore\(\), renderInitialUpdateStatus\(\)/);
 assert.match(popupHtml, /id="apply-update"[^>]*>檢查更新<\/button>/);
 assert.doesNotMatch(popupHtml, /id="apply-update"[^>]*hidden/);
 assert.match(popup, /chrome\.runtime\.sendMessage\(\{ type: "PING_BACKGROUND" \}\)/);
-assert.match(popup, /chrome\.runtime\.reload\(\)/);
+assert.match(popup, /reloadInlineAfterExtensionRestart: true/);
+assert.ok(popup.indexOf("reloadInlineAfterExtensionRestart: true") < popup.indexOf("chrome.runtime.reload()"));
 assert.match(popupHtml, /id="reload-card"[^>]*hidden/);
 assert.match(popupHtml, /id="reload-extension"[^>]*>套用插件更新<\/button>/);
 assert.match(popup, /window\.addEventListener\("pageshow", renderInitialUpdateStatus\)/);
@@ -90,7 +116,15 @@ assert.match(background, /message\.type === "PING_BACKGROUND"/);
 assert.match(background, /chrome\.runtime\.getManifest\(\)\.version/);
 assert.match(background, /flowStatusKind: message\.kind \|\| "ok"/);
 assert.match(background, /message\.type === "CHECK_FLOW_SCOPE"/);
-assert.match(background, /_sender\.tab\.id === activeReservationTabId/);
+assert.match(background, /senderTabId === activeReservationTabId/);
+assert.match(background, /activeMatchingForm/);
+assert.match(background, /InlineHelperCommon\.canAdoptFormScope/);
+assert.match(background, /activeReservationTabId: senderTabId/);
+assert.match(background, /reloadActiveReservationTabAfterUpdate/);
+assert.match(background, /chrome\.tabs\.query\(\{ url: \["https:\/\/inline\.app\/booking\/\*"\] \}\)/);
+assert.match(background, /InlineHelperCommon\.matchingBookingTabIds/);
+assert.match(background, /matchingTabIds\.map\(\(tabId\) => chrome\.tabs\.reload\(tabId\)\)/);
+assert.ok(manifest.host_permissions.includes("https://inline.app/*"));
 assert.match(background, /openScopedReservationTab/);
 assert.match(background, /FLOW_SCOPE_MIGRATION = "0\.3\.12"/);
 assert.match(background, /migrateUnsafeGlobalFlow/);

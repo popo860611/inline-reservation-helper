@@ -23,7 +23,7 @@ const backgroundVersionDetail = document.querySelector("#background-version-deta
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.22";
+const BUILD_VERSION = "0.3.23";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -139,9 +139,10 @@ updateButton.addEventListener("click", async (event) => {
   await checkForUpdates();
 });
 
-reloadExtensionButton.addEventListener("click", () => {
+reloadExtensionButton.addEventListener("click", async () => {
   reloadExtensionButton.disabled = true;
   reloadExtensionButton.textContent = "正在套用…";
+  await chrome.storage.local.set({ reloadInlineAfterExtensionRestart: true });
   chrome.runtime.reload();
 });
 

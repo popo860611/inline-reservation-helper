@@ -48,6 +48,31 @@
     return serialized ? `${base}?${serialized}` : base;
   }
 
+  function bookingIdentity(urlValue) {
+    const normalized = normalizeRestaurantInput(urlValue);
+    if (normalized.kind !== "url") return "";
+    const match = normalized.value.match(/\/booking\/([^/?#]+)\/([^/?#]+)/i);
+    return match ? `${match[1]}/${match[2]}` : "";
+  }
+
+  function canAdoptFormScope({ senderUrl, expectedUrl, senderActive, reservationEnabled }) {
+    const senderIdentity = bookingIdentity(senderUrl);
+    const expectedIdentity = bookingIdentity(expectedUrl);
+    return Boolean(
+      reservationEnabled && senderActive &&
+      /\/form\/?(?:[?#]|$)/i.test(String(senderUrl || "")) &&
+      senderIdentity && senderIdentity === expectedIdentity
+    );
+  }
+
+  function matchingBookingTabIds(tabs, expectedUrl) {
+    const expectedIdentity = bookingIdentity(expectedUrl);
+    if (!expectedIdentity) return [];
+    return (Array.isArray(tabs) ? tabs : [])
+      .filter((tab) => Number.isInteger(tab?.id) && bookingIdentity(tab.url) === expectedIdentity)
+      .map((tab) => tab.id);
+  }
+
   function normalizeTime(value) {
     return String(value || "")
       .replace(/：/g, ":")
@@ -127,6 +152,9 @@
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
     setUrlQueryParams,
+    bookingIdentity,
+    canAdoptFormScope,
+    matchingBookingTabIds,
     restaurantMatchScore,
     selectRestaurantMatch,
     normalizeTime,
