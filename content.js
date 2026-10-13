@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.28";
+  const CONTENT_VERSION = "0.3.29";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -179,11 +179,13 @@
   }
 
   function setNativeValue(element, value) {
+    element.focus();
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
     if (setter) setter.call(element, value);
     else element.value = value;
-    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(value) }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+    element.blur();
   }
 
   function fillInput(selectors, value) {
@@ -221,6 +223,32 @@
       return familyChanged || givenChanged;
     }
     return fillInput(['#name', 'input[autocomplete="name"]'], value) || fillByHint(/訂位人姓名|訂位人|姓名/i, value);
+  }
+
+  function contactValuesMatch(reservation) {
+    const familyInput = document.querySelector('#familyName, input[autocomplete="family-name"]');
+    const givenInput = document.querySelector('#givenName, input[autocomplete="given-name"]');
+    let nameMatches = true;
+    if ((familyInput && visible(familyInput)) || (givenInput && visible(givenInput))) {
+      const split = InlineHelperCommon.splitContactName(reservation.contactName);
+      nameMatches = (!familyInput || String(familyInput.value || "").trim() === split.familyName) &&
+        (!givenInput || String(givenInput.value || "").trim() === split.givenName);
+    } else {
+      const nameInput = document.querySelector('#name, input[autocomplete="name"]');
+      if (nameInput && visible(nameInput)) nameMatches = String(nameInput.value || "").trim() === String(reservation.contactName || "").trim();
+    }
+    const phoneInput = [...document.querySelectorAll('#phone, input[type="tel"]')].find(visible);
+    const emailInput = [...document.querySelectorAll('#email, input[type="email"]')].find(visible);
+    const phoneMatches = !phoneInput || String(phoneInput.value || "").replace(/\D/g, "") === String(reservation.contactPhone || "").replace(/\D/g, "");
+    const emailMatches = !emailInput || !reservation.contactEmail || String(emailInput.value || "").trim().toLowerCase() === String(reservation.contactEmail).trim().toLowerCase();
+    return nameMatches && phoneMatches && emailMatches;
+  }
+
+  function fillNextContactField(reservation) {
+    if (fillContactName(reservation.contactName)) return "姓名";
+    if (fillInput(['#phone', 'input[type="tel"]'], reservation.contactPhone) || fillByHint(/手機|電話|phone|mobile|tel/i, reservation.contactPhone)) return "手機";
+    if (fillInput(['#email', 'input[type="email"]'], reservation.contactEmail) || fillByHint(/email|e-mail|電子信箱|信箱/i, reservation.contactEmail)) return "Email";
+    return "";
   }
 
   function findTimeButtons() {
@@ -340,20 +368,32 @@
 
   function chooseDiningPurpose(reservation) {
     const wanted = String(reservation.diningPurpose || "朋友聚餐").trim();
-    const choices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((choice) =>
-      visible(choice) && (choice.textContent || "").trim() === wanted
-    );
-    const choice = choices.find((item) => {
+    const purposeChoices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((item) => {
       let parent = item.parentElement;
       for (let depth = 0; depth < 4 && parent; depth += 1, parent = parent.parentElement) {
         if (/用餐目的/.test(parent.innerText || "")) return true;
       }
       return false;
-    }) || choices[0];
+    });
+    if (!purposeChoices.length || purposeChoices.some(controlIsSelected)) return false;
+    const aliases = wanted === "朋友聚餐" ? ["朋友聚餐", "一般聚餐", "親友聚餐", "同住親友聚餐"] : [wanted];
+    const choice = aliases.map((label) => purposeChoices.find((item) => (item.textContent || "").trim() === label)).find(Boolean);
     if (!choice || controlIsSelected(choice)) return false;
     choice.click();
-    report("填目的", `已選擇用餐目的：${wanted}`);
+    report("填目的", `已選擇用餐目的：${(choice.textContent || wanted).trim()}`);
     return true;
+  }
+
+  function diningPurposeNeedsAttention() {
+    const choices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((item) => {
+      let parent = item.parentElement;
+      for (let depth = 0; depth < 4 && parent; depth += 1, parent = parent.parentElement) {
+        if (/用餐目的/.test(parent.innerText || "")) return true;
+      }
+      return false;
+    });
+    if (!choices.length || choices.some(controlIsSelected)) return null;
+    return { element: choices[0].parentElement || choices[0], label: "用餐目的" };
   }
 
   function findManualConsentControl({ modalOnly = false } = {}) {
@@ -569,16 +609,24 @@
         }
       }
 
-      const changed = [
-        fillInput(['#phone', 'input[type="tel"]'], reservation.contactPhone) || fillByHint(/手機|電話|phone|mobile|tel/i, reservation.contactPhone),
-        fillInput(['#email', 'input[type="email"]'], reservation.contactEmail) || fillByHint(/email|e-mail|電子信箱|信箱/i, reservation.contactEmail),
-        fillContactName(reservation.contactName)
-      ];
-      if (chooseDiningPurpose(reservation)) return;
-      if (changed.some(Boolean)) {
-        report("已填寫", "姓名、手機與 Email 已填入訂位資料頁");
+      const changedContact = fillNextContactField(reservation);
+      if (changedContact) {
+        report("填寫資料", `正在填寫並確認${changedContact}`);
+        setTimeout(advance, NAVIGATION_STEP_MS);
         return;
       }
+      if (hasBookingContactFields() && !contactValuesMatch(reservation)) {
+        report("資料未寫入", "Inline 清除了聯絡資料，助手會停止以避免空白送出", "error");
+        return;
+      }
+      if (chooseDiningPurpose(reservation)) return;
+      const missingPurpose = diningPurposeNeedsAttention();
+      if (missingPurpose) {
+        markNeedsAttention(missingPurpose);
+        report("缺必填", "找不到可安全對應的用餐目的，請手動選擇", "error");
+        return;
+      }
+      if (hasBookingContactFields()) report("已填寫", "姓名、手機與 Email 已逐欄確認寫入");
 
       const manualConsentControl = findManualConsentControl();
       if (manualConsentControl && state.authorizationStepAttemptedAt) {
