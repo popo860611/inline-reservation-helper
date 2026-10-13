@@ -26,7 +26,7 @@ const saveSettingsStatus = document.querySelector("#save-settings-status");
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.27";
+const BUILD_VERSION = "0.3.28";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -73,9 +73,11 @@ async function checkBackgroundVersion() {
     if (response?.ok && response.version) backgroundVersion = response.version;
   } catch (_error) {}
 
-  const { loadedPageHelperVersion } = await chrome.storage.local.get("loadedPageHelperVersion");
+  const { loadedPageHelperVersion, loadedPageHelperStage } = await chrome.storage.local.get(["loadedPageHelperVersion", "loadedPageHelperStage"]);
+  const stageNames = { availability: "選位", optional: "額外選購", contact: "訂位資料", payment: "付款", confirmation: "最後確認", captcha: "真人驗證", unknown: "辨識中" };
+  const stageDetail = loadedPageHelperStage ? `｜${stageNames[loadedPageHelperStage] || loadedPageHelperStage}` : "";
   pageRuntimeVersion.textContent = loadedPageHelperVersion
-    ? `頁面助手 v${loadedPageHelperVersion}${loadedPageHelperVersion === BUILD_VERSION ? "｜已套用" : "｜請重新載入 inline 頁面"}`
+    ? `頁面助手 v${loadedPageHelperVersion}${loadedPageHelperVersion === BUILD_VERSION ? "｜已套用" : "｜請重新載入 inline 頁面"}${stageDetail}`
     : "頁面助手：開啟 inline 後才會偵測";
   const ready = backgroundVersion === BUILD_VERSION;
   reloadCard.hidden = ready;

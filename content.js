@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.27";
+  const CONTENT_VERSION = "0.3.28";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -113,6 +113,41 @@
       visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
       labels.includes((button.textContent || "").trim())
     );
+  }
+
+  function buttonText(button) {
+    return String(button?.innerText || button?.textContent || button?.getAttribute?.("aria-label") || "").trim();
+  }
+
+  function findSafeOptionalSkipButton() {
+    return [...document.querySelectorAll('button, [role="button"]')].find((button) =>
+      visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+      InlineHelperCommon.isSafeOptionalSkipText(buttonText(button))
+    ) || null;
+  }
+
+  function hasBookingContactFields() {
+    return Boolean([...document.querySelectorAll('input[type="tel"], input[type="email"], input[autocomplete="name"], input[autocomplete="family-name"]')].find(visible));
+  }
+
+  function detectStage() {
+    const contact = hasBookingContactFields();
+    const optionalSkip = Boolean(findSafeOptionalSkipButton());
+    const finalConfirmation = Boolean(exactButton("確認預訂", "確認訂位", "送出訂位", "完成訂位", "送出預訂"));
+    const dateOrTime = Boolean(document.querySelector("#adult-picker, #kid-picker, .time-slot"));
+    return InlineHelperCommon.classifyBookingStage({
+      captcha: Boolean(hasCaptcha()),
+      payment: hasInteractivePaymentStep(),
+      contact,
+      optionalSkip,
+      finalConfirmation,
+      dateOrTime
+    });
+  }
+
+  function publishStage(stage) {
+    document.documentElement.dataset.inlineHelperStage = stage;
+    chrome.runtime.sendMessage({ type: "FLOW_STAGE", stage, version: CONTENT_VERSION }).catch(() => {});
   }
 
   function nextDate(value) {
@@ -421,6 +456,7 @@
       if (!reservation?.enabled) return;
       const helperUrl = new URLSearchParams(location.search).has("inline_helper");
       const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+      publishStage(detectStage());
 
       if (isSuccessPage()) {
         await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "訂位完成" });
@@ -507,13 +543,24 @@
         }
       }
 
-      if (adultPicker && selectedTimeIsValid) {
-        const skipPreorderButton = exactButton("跳過預先點餐", "跳過預點餐", "略過預先點餐");
-        if (skipPreorderButton) {
-          report("跳過點餐", "此時段提供預先點餐，已選擇跳過並繼續訂位");
-          skipPreorderButton.click();
+      if ((selectedTimeIsValid || !adultPicker) && !hasBookingContactFields() && !hasInteractivePaymentStep()) {
+        const safeSkipButton = findSafeOptionalSkipButton();
+        if (safeSkipButton) {
+          const label = buttonText(safeSkipButton);
+          const signature = `${location.pathname}|${label}`;
+          if (state.lastSafeSkipSignature === signature && Date.now() - Number(state.lastSafeSkipAt || 0) < 1500) {
+            report("等待換頁", `已按「${label}」，正在確認頁面是否前進`);
+            return;
+          }
+          state.lastSafeSkipSignature = signature;
+          state.lastSafeSkipAt = Date.now();
+          sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+          report("略過選購", `已辨識可略過的額外選購「${label}」，正在繼續訂位`);
+          safeSkipButton.click();
           return;
         }
+      }
+      if (adultPicker && selectedTimeIsValid) {
         const bookingButton = exactButton("完成預訂", "填寫訂位資料", "下一步");
         if (bookingButton) {
           report("下一步", "正在進入訂位資料頁");

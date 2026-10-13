@@ -159,6 +159,23 @@
     return true;
   }
 
+  function isSafeOptionalSkipText(value) {
+    const text = String(value || "").replace(/\s+/g, "").trim();
+    if (!text || /取消|返回|上一步|關閉|確認|付款|授權|送出/.test(text)) return false;
+    return /^(?:跳過|略過)(?:預先|預約)?(?:點餐|選餐|加購|選購|套餐|餐點|菜單)?$/.test(text) ||
+      /^(?:稍後再?|暫不|不需要|不用|無需)(?:點餐|選餐|加購|選購|套餐|餐點|選擇)?$/.test(text);
+  }
+
+  function classifyBookingStage({ captcha, payment, contact, optionalSkip, finalConfirmation, dateOrTime } = {}) {
+    if (captcha) return "captcha";
+    if (payment) return "payment";
+    if (contact) return "contact";
+    if (optionalSkip) return "optional";
+    if (finalConfirmation) return "confirmation";
+    if (dateOrTime) return "availability";
+    return "unknown";
+  }
+
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
     setUrlQueryParams,
@@ -174,6 +191,8 @@
     isAutoConsentText,
     splitContactName,
     controlStateIsSelected,
-    consentControlShouldAct
+    consentControlShouldAct,
+    isSafeOptionalSkipText,
+    classifyBookingStage
   };
 })();

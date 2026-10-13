@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName, controlStateIsSelected, consentControlShouldAct } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName, controlStateIsSelected, consentControlShouldAct, isSafeOptionalSkipText, classifyBookingStage } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -68,6 +68,19 @@ assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: true, target
 assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: false, targetVisible: false, required: false }), false);
 assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: false, targetVisible: true, required: false }), true);
 assert.equal(consentControlShouldAct({ isLabel: true, targetIsSelf: false, targetVisible: false, required: true }), true);
+assert.equal(isSafeOptionalSkipText("跳過預先點餐"), true);
+assert.equal(isSafeOptionalSkipText("略過加購"), true);
+assert.equal(isSafeOptionalSkipText("稍後選擇"), true);
+assert.equal(isSafeOptionalSkipText("不需要"), true);
+assert.equal(isSafeOptionalSkipText("預先點餐"), false);
+assert.equal(isSafeOptionalSkipText("確認訂位"), false);
+assert.equal(isSafeOptionalSkipText("取消訂位"), false);
+assert.equal(isSafeOptionalSkipText("返回"), false);
+assert.equal(classifyBookingStage({ optionalSkip: true, dateOrTime: true }), "optional");
+assert.equal(classifyBookingStage({ payment: true, contact: true }), "payment");
+assert.equal(classifyBookingStage({ captcha: true, payment: true }), "captcha");
+assert.equal(classifyBookingStage({ contact: true }), "contact");
+assert.equal(classifyBookingStage({}), "unknown");
 assert.equal(restaurantMatchScore("辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", "辛殿信義店"), 1);
 assert.equal(selectRestaurantMatch([
   { name: "辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", bookingLink: bookingUrl },
@@ -211,12 +224,17 @@ assert.match(content, /if \(controlIsSelected\(target\)\) return false/);
 assert.match(content, /target\.click\(\);[\s\S]*已同意條款/);
 assert.match(content, /scrollable\.scrollTop = scrollable\.scrollHeight/);
 assert.ok(content.indexOf("acceptManualConsent(manualConsentControl)") < content.indexOf("const paymentAuthorizationButton = findPaymentAuthorizationButton()"));
-assert.match(content, /const CONTENT_VERSION = "0\.3\.27"/);
+assert.match(content, /const CONTENT_VERSION = "0\.3\.28"/);
 assert.match(content, /const FAST_STEP_MS = 80/);
 assert.match(content, /const NAVIGATION_STEP_MS = 240/);
-assert.match(content, /exactButton\("跳過預先點餐", "跳過預點餐", "略過預先點餐"\)/);
-assert.match(content, /skipPreorderButton\.click\(\)/);
-assert.ok(content.indexOf("skipPreorderButton.click()") < content.indexOf('exactButton("完成預訂"'));
+assert.match(content, /function findSafeOptionalSkipButton\(\)/);
+assert.match(content, /InlineHelperCommon\.isSafeOptionalSkipText/);
+assert.match(content, /!hasBookingContactFields\(\) && !hasInteractivePaymentStep\(\)/);
+assert.match(content, /safeSkipButton\.click\(\)/);
+assert.ok(content.indexOf("safeSkipButton.click()") < content.indexOf('exactButton("完成預訂"'));
+assert.match(content, /function detectStage\(\)/);
+assert.match(content, /type: "FLOW_STAGE"/);
+assert.match(background, /message\.type === "FLOW_STAGE"/);
 assert.match(content, /observer\.timer = setTimeout\(advance, FAST_STEP_MS\)/);
 assert.match(content, /dataset\.inlineHelperVersion === CONTENT_VERSION\) return/);
 assert.match(content, /dataset\.inlineHelperVersion = CONTENT_VERSION/);

@@ -202,6 +202,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "FLOW_STAGE") {
+    chrome.storage.local.get("activeReservationTabId").then(({ activeReservationTabId }) => {
+      if (_sender.tab?.id === activeReservationTabId) {
+        return chrome.storage.local.set({
+          loadedPageHelperStage: String(message.stage || "unknown"),
+          loadedPageHelperVersion: String(message.version || "未知")
+        });
+      }
+    }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (message.type === "CHECK_FLOW_SCOPE") {
     extensionReady.then(() => chrome.storage.local.get([
       "activeReservationTabId", "lastOpenedUrl", "reservation"
