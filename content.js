@@ -259,6 +259,27 @@
     ) || null;
   }
 
+  function acceptManualConsent(control) {
+    if (!control) return false;
+    const disabled = control.disabled || control.getAttribute("aria-disabled") === "true";
+    if (disabled) {
+      const scope = control.closest('[role="dialog"], [aria-modal="true"]') || document;
+      const scrollable = [scope, ...scope.querySelectorAll("div, section, main")].find((element) =>
+        element.scrollHeight > element.clientHeight + 8
+      );
+      if (scrollable) {
+        scrollable.scrollTop = scrollable.scrollHeight;
+        scrollable.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+      report("閱讀條款", "正在捲到規則與注意事項底部，完成後會自動同意");
+      setTimeout(advance, 400);
+      return true;
+    }
+    control.click();
+    report("已同意條款", "已按下規則與注意事項的同意按鈕；尚未填寫或授權信用卡");
+    return true;
+  }
+
   function findPaymentAuthorizationButton() {
     return [...document.querySelectorAll("button")].find((button) =>
       visible(button) && /授權信用卡|信用卡.*確認訂位|支付訂金|前往付款|付款.*確認|預授權/.test((button.textContent || "").trim())
@@ -314,16 +335,12 @@
         report("需付款", "已進入信用卡、訂金或驗證頁，請由你手動完成", "error");
         return;
       }
+      const manualConsentControl = findManualConsentControl();
+      if (acceptManualConsent(manualConsentControl)) return;
       const paymentAuthorizationButton = findPaymentAuthorizationButton();
       if (paymentAuthorizationButton) {
         markNeedsAttention({ element: paymentAuthorizationButton, label: "信用卡授權與確認訂位" });
-        report("需你授權", "已停在信用卡授權／確認訂位按鈕前；請由你本人確認條款、金額與取消規則後手動操作", "error");
-        return;
-      }
-      const manualConsentControl = findManualConsentControl();
-      if (manualConsentControl) {
-        markNeedsAttention({ element: manualConsentControl, label: "規則與注意事項" });
-        report("需你同意", "請閱讀規則與注意事項，並由你本人手動同意；插件不會代替接受條款", "error");
+        report("需你授權", "條款與畫面金額已處理；此按鈕本身會授權信用卡並確認訂位，請手動按下後提供下一頁畫面", "error");
         return;
       }
       if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
