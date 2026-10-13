@@ -210,6 +210,45 @@
     return null;
   }
 
+  function calendarMonthValue(value) {
+    const match = String(value || "").match(/(20\d{2})年(\d{1,2})月/);
+    return match ? Number(match[1]) * 12 + Number(match[2]) - 1 : null;
+  }
+
+  function selectTargetCalendarDate(targetDate) {
+    const cell = document.querySelector(`[data-date="${targetDate}"]`);
+    if (cell && visible(cell)) {
+      if (getComputedStyle(cell).cursor !== "pointer") return "unavailable";
+      report("選日期", `正在選擇 ${targetDate}`);
+      cell.click();
+      return "selected";
+    }
+
+    const target = new Date(`${targetDate}T12:00:00`);
+    const targetMonth = target.getFullYear() * 12 + target.getMonth();
+    const shownMonths = [...document.querySelectorAll("h4")]
+      .map((heading) => calendarMonthValue(heading.textContent))
+      .filter((value) => value !== null)
+      .sort((left, right) => left - right);
+    if (!shownMonths.length) return "missing";
+
+    if (targetMonth > shownMonths.at(-1)) {
+      const next = [...document.querySelectorAll(".nextMonth")].filter(visible).at(-1);
+      if (!next) return "missing";
+      report("切換月份", `正在前往 ${targetDate.slice(0, 7)}`);
+      next.click();
+      return "navigating";
+    }
+    if (targetMonth < shownMonths[0]) {
+      const previous = [...document.querySelectorAll(".prevMonth")].filter(visible)[0];
+      if (!previous) return "missing";
+      report("切換月份", `正在前往 ${targetDate.slice(0, 7)}`);
+      previous.click();
+      return "navigating";
+    }
+    return "missing";
+  }
+
   function selectBookingOption() {
     const nodes = [...document.querySelectorAll("p,h2,h3,h4,button")].filter(visible);
     const headingIndex = nodes.findIndex((node) =>
@@ -372,8 +411,22 @@
       const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
       const shownDate = pageSelectedDate();
       if (adultPicker && shownDate && lastSelectedDate && shownDate.value !== lastSelectedDate) {
+        const dateResult = selectTargetCalendarDate(lastSelectedDate);
+        if (dateResult === "selected" || dateResult === "navigating") return;
+        if (dateResult === "unavailable") {
+          const following = nextDate(lastSelectedDate);
+          if (following <= reservation.dateEnd) {
+            await chrome.storage.local.set({ lastSelectedDate: following });
+            report("下一天", `${lastSelectedDate} 無法選擇，接著檢查 ${following}`);
+            setTimeout(advance, 250);
+          } else {
+            await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+            report("沒有日期", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有可選日期`, "error");
+          }
+          return;
+        }
         markNeedsAttention({ element: shownDate.element, label: "用餐日期" });
-        report("日期不符", `inline 目前顯示 ${shownDate.value}；請手動選擇 ${lastSelectedDate}，完成後助手會繼續`, "error");
+        report("日期失敗", `找不到 ${lastSelectedDate} 的月曆日期格，已停止以避免選錯日期`, "error");
         return;
       }
       const selectedTime = selectedTimeButton();
