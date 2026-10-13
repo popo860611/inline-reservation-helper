@@ -105,10 +105,15 @@
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
-  function authorizationAction({ autoSubmit, submitAttemptedAt }) {
+  function finalSubmitAction({ autoSubmit, submitAttemptedAt, hasFinalButton }) {
+    if (!hasFinalButton) return autoSubmit ? "idle" : "processing";
     if (!autoSubmit) return "preview";
     if (submitAttemptedAt) return "wait";
     return "submit";
+  }
+
+  function isAutoConsentText(value) {
+    return /我已閱讀並同意|我同意.*(?:信用卡綁定|預收取消費|須知|服務條款|隱私權)|同意.*規則|同意.*注意事項|接受.*條款/.test(String(value || "").trim());
   }
 
   globalThis.InlineHelperCommon = {
@@ -119,6 +124,7 @@
     normalizeTime,
     timeToMinutes,
     dateTextToIso,
-    authorizationAction
+    finalSubmitAction,
+    isAutoConsentText
   };
 })();

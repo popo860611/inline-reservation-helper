@@ -301,7 +301,7 @@
 
   function findManualConsentControl() {
     return [...document.querySelectorAll('button, [role="button"], label')].find((element) =>
-      visible(element) && /我已閱讀並同意|同意.*規則|同意.*注意事項|接受.*條款/.test((element.textContent || "").trim())
+      visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent)
     ) || null;
   }
 
@@ -384,6 +384,10 @@
         return;
       }
       const manualConsentControl = findManualConsentControl();
+      if (manualConsentControl && state.authorizationStepAttemptedAt) {
+        delete state.authorizationStepAttemptedAt;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
       if (acceptManualConsent(manualConsentControl)) return;
       if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
         navigateToDate(reservation, reservation.dateStart);
@@ -487,36 +491,28 @@
 
       const paymentAuthorizationButton = findPaymentAuthorizationButton();
       if (paymentAuthorizationButton) {
-        const authorizationAction = InlineHelperCommon.authorizationAction({
-          autoSubmit: reservation.autoSubmit,
-          submitAttemptedAt: state.submitAttemptedAt
-        });
-        if (authorizationAction === "preview") {
-          await chrome.storage.local.set({
-            reservation: { ...reservation, enabled: false },
-            previewCompletedAt: Date.now()
-          });
-          showPreviewComplete();
-          report("預演完成", "已到信用卡授權與確認訂位前；預演模式沒有送出訂位");
+        if (state.authorizationStepAttemptedAt) {
+          report("進入確認頁", "已按過前往確認頁，正在等待 inline 顯示最終確認資料");
           return;
         }
-        if (authorizationAction === "wait") {
-          report("請確認", "已按過信用卡授權與確認訂位，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
-          return;
-        }
-        state.submitAttemptedAt = Date.now();
+        state.authorizationStepAttemptedAt = Date.now();
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-        report("確認中", "條款與金額已處理，正在授權信用卡並確認訂位");
+        report("進入確認頁", "條款與金額已處理，正在開啟最終確認資料頁");
         paymentAuthorizationButton.click();
         return;
       }
 
       const finalButton = exactButton("確認預訂", "確認訂位", "送出訂位", "完成訂位", "送出預訂");
-      if (!reservation.autoSubmit) {
-        if (!finalButton) {
-          report("預演處理中", "資料已填妥，正在等待 inline 顯示最終確認步驟");
-          return;
-        }
+      const finalAction = InlineHelperCommon.finalSubmitAction({
+        autoSubmit: reservation.autoSubmit,
+        submitAttemptedAt: state.submitAttemptedAt,
+        hasFinalButton: Boolean(finalButton)
+      });
+      if (finalAction === "processing") {
+        report("預演處理中", "資料已填妥，正在等待 inline 顯示最終確認步驟");
+        return;
+      }
+      if (finalAction === "preview") {
         await chrome.storage.local.set({
           reservation: { ...reservation, enabled: false },
           previewCompletedAt: Date.now()
@@ -525,11 +521,11 @@
         report("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位");
         return;
       }
-      if (finalButton) {
-        if (state.submitAttemptedAt) {
-          report("請確認", "已送出一次，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
-          return;
-        }
+      if (finalAction === "wait") {
+        report("請確認", "已送出一次，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
+        return;
+      }
+      if (finalAction === "submit") {
         state.submitAttemptedAt = Date.now();
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
         report("送出中", "正在送出最終訂位");
