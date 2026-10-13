@@ -1,0 +1,542 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+
+const root = path.resolve(__dirname, "..");
+require(path.join(root, "common.js"));
+const common = globalThis.InlineHelperCommon;
+const bookingUrl = "https://inline.app/booking/-company/-branch";
+
+function paymentInput(label, value = "") {
+  return {
+    id: "", name: "", placeholder: "", autocomplete: "", type: "text", value,
+    disabled: false, readOnly: false, labels: [{ textContent: label }],
+    getAttribute: () => null,
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 200, height: 40 }),
+    dispatchEvent: () => {}
+  };
+}
+
+async function testContactFill(initialName, expectedName, enabled = true) {
+  const inputs = [
+    paymentInput("手機"),
+    paymentInput("Email"),
+    paymentInput("訂位人姓名", initialName)
+  ];
+  const timers = [];
+  const reservation = {
+    enabled, contactName: "測試姓名", contactPhone: "0912345678",
+    contactEmail: "test@example.com", dateStart: "2026-10-14", dateEnd: "2026-10-14",
+    timeStart: "12:00", timeEnd: "12:00"
+  };
+  const document = {
+    documentElement: { dataset: {} }, body: { innerText: "" },
+    querySelectorAll: (selector) => selector === "input" ? inputs : [],
+    querySelector: () => null
+  };
+  let messageHandler;
+  const chrome = {
+    runtime: {
+      sendMessage: async (message) => message.type === "CHECK_FLOW_SCOPE" ? { active: true } : { ok: true },
+      onMessage: { addListener: (handler) => { messageHandler = handler; } }
+    },
+    storage: {
+      local: {
+        get: async () => ({ reservation, lastSelectedDate: undefined }),
+        set: async () => {}
+      },
+      onChanged: { addListener: () => {} }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}/form`, search: "", pathname: "/booking/-company/-branch/form" },
+    URLSearchParams,
+    sessionStorage: { getItem: () => null, setItem: () => {} },
+    MutationObserver: class { observe() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    Event: class { constructor(type) { this.type = type; } },
+    setTimeout: (callback) => { timers.push(callback); return timers.length; },
+    clearTimeout: () => {}
+  });
+  if (!enabled) {
+    await new Promise(setImmediate);
+    assert.deepEqual(inputs.map((input) => input.value), ["", "", initialName]);
+    const result = await new Promise((resolve) => messageHandler({ type: "FILL_CONTACT_DETAILS" }, {}, resolve));
+    assert.equal(result.ok, true);
+  }
+  for (let step = 0; step < 5; step += 1) {
+    await new Promise(setImmediate);
+    if (!timers.length) break;
+    timers.shift()();
+  }
+  await new Promise(setImmediate);
+  assert.deepEqual(inputs.map((input) => input.value), ["0912345678", "test@example.com", expectedName]);
+}
+
+async function testDateScanStopsAfterTimeOrDetails() {
+  async function runScenario({ offerTime, revealDetailsBeforeTimer }) {
+    let showTime = true;
+    let showDetails = false;
+    let timeClicks = 0;
+    let redirects = 0;
+    let observerCallback;
+    const timers = [];
+    const saved = new Map();
+    const reservation = {
+      enabled: true, restaurantQuery: bookingUrl,
+      dateStart: "2026-10-19", dateEnd: "2026-10-22",
+      timeStart: "17:30", timeEnd: "18:00"
+    };
+    const adultPicker = { value: "2", options: [{ value: "2", textContent: "2位大人" }] };
+    const timeButton = {
+      tagName: "BUTTON", textContent: `${offerTime ? "17:30" : "11:30"} NT$200 x 2`, disabled: false,
+      classList: { contains: () => false }, getAttribute: () => null,
+      getBoundingClientRect: () => ({ width: 200, height: 40 }),
+      click: () => { timeClicks += 1; showTime = false; }
+    };
+    const phone = paymentInput("手機");
+    const document = {
+      documentElement: { dataset: {} }, body: { innerText: "" },
+      querySelector: (selector) => selector === "#adult-picker" ? adultPicker : null,
+      querySelectorAll: (selector) => selector === "input" ? (showDetails ? [phone] : []) :
+        selector === "button" || selector.includes('button, [role="button"]') ? (showTime ? [timeButton] : []) : []
+    };
+    const location = {
+      href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1",
+      pathname: "/booking/-company/-branch", replace: () => { redirects += 1; }
+    };
+    const chrome = {
+      runtime: {
+        sendMessage: async (message) => message.type === "CHECK_FLOW_SCOPE" ? { active: true } : { ok: true },
+        onMessage: { addListener: () => {} }
+      },
+      storage: {
+        local: {
+          get: async () => ({ reservation, lastSelectedDate: "2026-10-19" }),
+          set: async () => {}
+        },
+        onChanged: { addListener: () => {} }
+      }
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+      document, chrome, InlineHelperCommon: common, location, URLSearchParams,
+      sessionStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
+      MutationObserver: class { constructor(callback) { observerCallback = callback; } observe() {} },
+      getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+      setTimeout: (callback) => { timers.push(callback); return timers.length; }, clearTimeout: () => {},
+      Date
+    });
+    await new Promise(setImmediate);
+    if (offerTime) {
+      assert.equal(timeClicks, 1);
+      observerCallback();
+      while (timers.length) { timers.shift()(); await new Promise(setImmediate); }
+      assert.equal(timeClicks, 1);
+      assert.equal(redirects, 0);
+    } else {
+      assert.equal(timers.length, 1);
+      if (revealDetailsBeforeTimer) showDetails = true;
+      timers.shift()();
+      await new Promise(setImmediate);
+      assert.equal(redirects, 0);
+    }
+  }
+  await runScenario({ offerTime: true });
+  await runScenario({ offerTime: false, revealDetailsBeforeTimer: true });
+}
+
+async function testTapPayRequiresManualCard() {
+  const holder = paymentInput("持卡人姓名");
+  const frame = {
+    src: "https://js.tappaysdk.com/sdk/tpdirect/tappay-field/html/v5.14.0",
+    getBoundingClientRect: () => ({ width: 300, height: 40 })
+  };
+  const messages = [];
+  const writes = [];
+  const reservation = { enabled: true, restaurantQuery: bookingUrl };
+  const document = {
+    documentElement: { dataset: {} }, body: { innerText: "" },
+    querySelectorAll: (selector) => selector === "input" ? [holder] :
+      selector.includes("iframe") ? [frame] : [],
+    querySelector: () => null
+  };
+  const chrome = {
+    runtime: {
+      sendMessage: async (message) => { messages.push(message); return { active: true }; },
+      onMessage: { addListener: () => {} }
+    },
+    storage: {
+      local: {
+        get: async () => ({ reservation }),
+        set: async (value) => { writes.push(value); }
+      },
+      onChanged: { addListener: () => {} }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}/form`, search: "", pathname: "/booking/-company/-branch/form" },
+    URLSearchParams, sessionStorage: { getItem: () => null, setItem: () => {} },
+    MutationObserver: class { observe() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    Event: class { constructor(type) { this.type = type; } },
+    setTimeout: () => 0, clearTimeout: () => {}
+  });
+  await new Promise(setImmediate);
+  assert.equal(messages.find((message) => message.type === "FLOW_STAGE")?.stage, "verification");
+  assert.match(messages.find((message) => message.type === "FLOW_STATUS")?.detail || "", /自行填寫信用卡/);
+  assert.equal(writes.some((write) => write.reservation?.enabled === false), true);
+}
+
+async function testOldConsentNoticeClearsAfterTaskStops() {
+  let removed = false;
+  let suppressionStyle;
+  let storageChanged;
+  let observerDisconnected = false;
+  const notice = { remove: () => { removed = true; } };
+  const document = {
+    documentElement: { dataset: {}, appendChild: (element) => { suppressionStyle = element; } }, body: { innerText: "" },
+    querySelectorAll: () => [],
+    querySelector: (selector) => selector === "#inline-helper-consent-notice" ? notice :
+      selector === "#inline-helper-consent-suppression" ? suppressionStyle : null,
+    createElement: () => ({ id: "", textContent: "" })
+  };
+  const chrome = {
+    runtime: {
+      sendMessage: async (message) => message.type === "CHECK_FLOW_SCOPE" ? { active: true } : { ok: true },
+      onMessage: { addListener: () => {} }
+    },
+    storage: {
+      local: { get: async () => ({ reservation: { enabled: false } }), set: async () => {} },
+      onChanged: { addListener: (listener) => { storageChanged = listener; } }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}/form`, search: "", pathname: "/booking/-company/-branch/form" },
+    URLSearchParams, sessionStorage: { getItem: () => null, setItem: () => {} },
+    MutationObserver: class { observe() {} disconnect() { observerDisconnected = true; } },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    setTimeout: () => 0, clearTimeout: () => {}
+  });
+  await new Promise(setImmediate);
+  assert.equal(removed, true);
+  assert.equal(document.documentElement.dataset.inlineHelperConsentSuppressed, "true");
+  assert.match(suppressionStyle.textContent, /#inline-helper-consent-notice\{display:none!important\}/);
+  // An older script can recreate the notice after this instance removes it.
+  // The persistent CSS rule still hides the recreated host before paint.
+  assert.equal(document.documentElement.dataset.inlineHelperConsentSuppressed, "true");
+  document.documentElement.dataset.inlineHelperVersion = "newer-version";
+  storageChanged({ reservation: {} }, "local");
+  assert.equal(observerDisconnected, true);
+}
+
+async function testMarketingSuccessTextDoesNotSubmit() {
+  let clicks = 0;
+  const button = {
+    tagName: "BUTTON", textContent: "授權信用卡", disabled: false,
+    classList: { contains: () => false },
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 200, height: 40 }),
+    click: () => { clicks += 1; }
+  };
+  const messages = [];
+  const writes = [];
+  const reservation = { enabled: true, contactName: "測試姓名", contactPhone: "0912345678", autoSubmit: true };
+  const document = {
+    documentElement: { dataset: {} },
+    body: { innerText: "餐廳說明：預約成功後請留意通知。" },
+    querySelectorAll: (selector) => selector === "button" || selector.includes('button, [role="button"]') ? [button] : [],
+    querySelector: () => null
+  };
+  const chrome = {
+    runtime: {
+      sendMessage: async (message) => { messages.push(message); return { active: true }; },
+      onMessage: { addListener: () => {} }
+    },
+    storage: {
+      local: {
+        get: async () => ({ reservation }),
+        set: async (value) => { writes.push(value); }
+      },
+      onChanged: { addListener: () => {} }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}/confirmation`, search: "", pathname: "/booking/-company/-branch/confirmation" },
+    URLSearchParams, sessionStorage: { getItem: () => null, setItem: () => {} },
+    MutationObserver: class { observe() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    setTimeout: () => 0, clearTimeout: () => {}
+  });
+  await new Promise(setImmediate);
+  assert.equal(clicks, 0);
+  assert.equal(writes.some((write) => write.reservation?.enabled === false), true);
+  assert.match(messages.find((message) => message.type === "FLOW_STATUS")?.detail || "", /自行核對金額並操作/);
+  assert.equal(messages.some((message) => message.type === "FLOW_STATUS" && /訂位成功/.test(message.detail)), false);
+}
+
+async function testDepositConsentDoesNotRecreateRulesNotice(payment) {
+  const inputs = [paymentInput("訂位人姓名", "已填姓名"), paymentInput("手機", "0912345678")];
+  if (payment) inputs.push(paymentInput("持卡人姓名"));
+  const deposit = {
+    tagName: "BUTTON", textContent: "", disabled: false,
+    getAttribute: (name) => name === "aria-required" ? "true" : name === "aria-checked" ? "false" : null,
+    getBoundingClientRect: () => ({ width: 20, height: 20 }),
+    click: () => { throw new Error("Must not accept deposit terms during this test"); }
+  };
+  const label = {
+    tagName: "LABEL", htmlFor: "deposit-policy",
+    textContent: "我同意上述預付訂金及取消訂位退款須知，並理解需完成線上預付訂金始視為訂位成功。",
+    closest: () => null,
+    getBoundingClientRect: () => ({ width: 300, height: 40 })
+  };
+  let observerCallback;
+  let noticeCreated = 0;
+  let style;
+  let notice = { remove: () => { notice = null; } };
+  const timers = [];
+  const messages = [];
+  let reservation = { enabled: true, contactName: "已填姓名", contactPhone: "0912345678" };
+  const document = {
+    documentElement: { dataset: {}, appendChild: (node) => { style = node; } }, body: { innerText: "" },
+    getElementById: () => deposit,
+    createElement: (tag) => {
+      if (tag !== "style") noticeCreated += 1;
+      return { id: "", textContent: "" };
+    },
+    querySelector: (selector) => selector === "#inline-helper-consent-notice" ? notice :
+      selector === "#inline-helper-consent-suppression" ? style : null,
+    querySelectorAll: (selector) => selector === "input" ? inputs :
+      selector === 'button, [role="button"], [role="checkbox"], label' ? [label] : []
+  };
+  const chrome = {
+    runtime: { sendMessage: async (message) => { messages.push(message); return { active: true }; }, onMessage: { addListener() {} } },
+    storage: { local: { get: async () => ({ reservation }), set: async (value) => { reservation = value.reservation; } }, onChanged: { addListener() {} } }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}/form`, search: "", pathname: "/booking/-company/-branch/form" },
+    URLSearchParams, sessionStorage: { getItem: () => null, setItem() {} },
+    MutationObserver: class { constructor(callback) { observerCallback = callback; } observe() {} disconnect() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    setTimeout: (callback) => { timers.push(callback); return timers.length; }, clearTimeout() {}
+  });
+  await new Promise(setImmediate);
+  for (let i = 0; i < 12; i += 1) {
+    observerCallback([{ type: "childList", target: document.documentElement, addedNodes: [{ id: "inline-helper-consent-notice" }], removedNodes: [] }]);
+  }
+  assert.equal(timers.length, 0, "Helper mutations must not schedule the flow again");
+  for (let i = 0; i < 12; i += 1) {
+    observerCallback([{ type: "childList", target: {}, addedNodes: [{ id: "site-content" }], removedNodes: [] }]);
+    timers.shift()();
+    await new Promise(setImmediate);
+  }
+  assert.equal(noticeCreated, 0, "Deposit consent must never create the rules notice");
+  assert.equal(notice, null);
+  assert.equal(document.documentElement.dataset.inlineHelperConsentSuppressed, "true");
+  assert.equal(messages.some((message) => message.status === "待手動同意"), false);
+  assert.equal(reservation.enabled, !payment);
+  assert.deepEqual(inputs.slice(0, 2).map((input) => input.value), ["已填姓名", "0912345678"]);
+}
+
+async function testConsentResumesWithoutDisablingTask() {
+  let modalOpen = true;
+  let oldNoticeRemoved = false;
+  let notice = { shadowRoot: { querySelector: () => null }, remove: () => { oldNoticeRemoved = true; notice = null; } };
+  let suppressionStyle;
+  let observerCallback;
+  let clickNotice;
+  let inlineClicks = 0;
+  const helperButton = { disabled: true, addEventListener: (_type, callback) => { clickNotice = callback; } };
+  const helperDetail = { textContent: "" };
+  const scrollArea = { clientHeight: 400, scrollHeight: 1000, scrollTop: 0 };
+  const modal = { querySelectorAll: () => [scrollArea] };
+  const timers = [];
+  const messages = [];
+  const writes = [];
+  const consent = {
+    tagName: "BUTTON", textContent: "我已閱讀並同意規則與注意事項", disabled: true,
+    getAttribute: () => null,
+    getBoundingClientRect: () => ({ width: 200, height: 40 }),
+    closest: (selector) => selector.includes(".house-rules") ? modal : null,
+    click: () => { inlineClicks += 1; modalOpen = false; }
+  };
+  const reservation = { enabled: true, contactName: "測試姓名", contactPhone: "0912345678" };
+  const document = {
+    documentElement: { dataset: {}, appendChild: (node) => {
+      if (node.id === "inline-helper-consent-suppression") suppressionStyle = node;
+      else notice = node;
+    } },
+    body: { innerText: "" },
+    createElement: () => {
+      const host = { style: {}, remove: () => { notice = null; } };
+      host.attachShadow = () => {
+        host.shadowRoot = { innerHTML: "", querySelector: (selector) =>
+          selector === "button" ? helperButton : selector === "span" ? helperDetail : null };
+        return host.shadowRoot;
+      };
+      return host;
+    },
+    querySelector: (selector) => selector === "#inline-helper-consent-notice" ? notice :
+      selector === "#inline-helper-consent-suppression" ? suppressionStyle : null,
+    querySelectorAll: (selector) => modalOpen && selector.includes('button, [role="button"], [role="checkbox"], label') ? [consent] : []
+  };
+  const chrome = {
+    runtime: {
+      sendMessage: async (message) => { messages.push(message); return { active: true }; },
+      onMessage: { addListener: () => {} }
+    },
+    storage: {
+      local: {
+        get: async () => ({ reservation }),
+        set: async (value) => { writes.push(value); }
+      },
+      onChanged: { addListener: () => {} }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document, chrome, InlineHelperCommon: common,
+    location: { href: `${bookingUrl}/form`, search: "", pathname: "/booking/-company/-branch/form" },
+    URLSearchParams, sessionStorage: { getItem: () => null, setItem: () => {} },
+    MutationObserver: class { constructor(callback) { observerCallback = callback; } observe() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    setTimeout: (callback) => { timers.push(callback); return timers.length; },
+    clearTimeout: () => {}
+  });
+  await new Promise(setImmediate);
+  assert.ok(notice);
+  assert.equal(oldNoticeRemoved, true);
+  assert.equal(document.documentElement.dataset.inlineHelperConsentSuppressed, "false");
+  assert.equal(scrollArea.scrollTop, 360);
+  assert.equal(helperButton.disabled, true);
+  assert.equal(inlineClicks, 0);
+  assert.equal(writes.some((write) => write.reservation?.enabled === false), false);
+  assert.match(messages.find((message) => message.type === "FLOW_STATUS")?.detail || "", /規則捲到底/);
+  timers.shift()();
+  await new Promise(setImmediate);
+  assert.equal(scrollArea.scrollTop, 600);
+  assert.equal(inlineClicks, 0);
+  consent.disabled = false;
+  observerCallback();
+  timers.shift()();
+  await new Promise(setImmediate);
+  assert.equal(helperButton.disabled, false);
+  assert.equal(inlineClicks, 0);
+  clickNotice();
+  await new Promise(setImmediate);
+  assert.equal(inlineClicks, 1);
+  assert.equal(notice, null);
+  assert.equal(document.documentElement.dataset.inlineHelperConsentSuppressed, "true");
+  assert.equal(writes.some((write) => write.reservation?.enabled === false), false);
+  timers.at(-1)();
+  await new Promise(setImmediate);
+  assert.match(messages.filter((message) => message.type === "FLOW_STATUS").at(-1)?.detail || "", /等待 inline 顯示下一步/);
+}
+
+async function testScopedBackgroundRelay() {
+  const stored = {
+    flowScopeMigration: "0.3.32",
+    activeReservationTabId: 7,
+    lastOpenedUrl: bookingUrl,
+    reservation: { restaurantQuery: bookingUrl, enabled: false },
+    loadedPageHelperStage: "payment"
+  };
+  let messageHandler;
+  let tabUrl = `${bookingUrl}/payment`;
+  const sent = [];
+  const writes = [];
+  const injected = [];
+  const activated = [];
+  let staleContactScript = true;
+  let activeTabIsTask = true;
+  const chrome = {
+    runtime: {
+      id: "test-extension",
+      getURL: (name) => `chrome-extension://test-extension/${name}`,
+      onMessage: { addListener: (handler) => { messageHandler = handler; } },
+      onStartup: { addListener: () => {} },
+      onInstalled: { addListener: () => {} }
+    },
+    alarms: { onAlarm: { addListener: () => {} } },
+    scripting: { executeScript: async (options) => { injected.push(options.files[0]); } },
+    storage: { local: {
+      get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, stored[key]])),
+      set: async (value) => { writes.push(value); Object.assign(stored, value); },
+      remove: async () => {}
+    } },
+    tabs: {
+      get: async () => ({ id: 7, active: activeTabIsTask, url: tabUrl }),
+      query: async () => [activeTabIsTask
+        ? { id: 7, active: true, url: tabUrl }
+        : { id: 9, active: true, url: "chrome://extensions" }],
+      update: async (id, options) => { activated.push({ id, options }); activeTabIsTask = true; },
+      sendMessage: async (id, message) => {
+        if (message.type === "FILL_CONTACT_DETAILS" && staleContactScript) {
+          staleContactScript = false;
+          throw new Error("old extension context");
+        }
+        sent.push({ id, message });
+        return { ok: true };
+      }
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "background.js"), "utf8"), {
+    chrome, InlineHelperCommon: common, importScripts: () => {}
+  });
+  const sender = { id: "test-extension", url: "chrome-extension://test-extension/popup.html" };
+  assert.notEqual(messageHandler({ type: "FILL_CARD_FROM_POPUP" }, sender, () => {}), true);
+  tabUrl = `${bookingUrl}/form`;
+  const refill = (data) => new Promise((resolve) => messageHandler({ type: "FILL_CONTACT_FROM_POPUP" }, data, resolve));
+  assert.equal((await refill(sender)).ok, true);
+  assert.equal(sent.at(-1).message.type, "FILL_CONTACT_DETAILS");
+  assert.deepEqual(injected, ["common.js", "content.js"]);
+  tabUrl = "https://inline.app/booking/-company/-other/form";
+  assert.equal((await refill(sender)).ok, false);
+  assert.equal((await refill({ id: "other", url: "chrome-extension://other/popup.html" })).ok, false);
+  stored.reservation.enabled = true;
+  const checkScope = (stage) => new Promise((resolve) => messageHandler(
+    { type: "CHECK_FLOW_SCOPE", stage },
+    { tab: { id: 8, active: true, url: bookingUrl } }, resolve
+  ));
+  assert.equal((await checkScope("availability")).active, false);
+  assert.equal((await checkScope("payment")).active, true);
+  assert.equal(stored.activeReservationTabId, 8);
+  tabUrl = `${bookingUrl}/form`;
+  stored.reservation.enabled = false;
+  stored.reservation.autoSubmit = true;
+  const resume = (data) => new Promise((resolve) => messageHandler({ type: "RESUME_CURRENT_FLOW" }, data, resolve));
+  assert.equal((await resume(sender)).ok, true);
+  assert.equal(stored.reservation.enabled, true);
+  assert.equal(stored.reservation.autoSubmit, false);
+  assert.equal(stored.activeReservationTabId, 7);
+  assert.deepEqual(injected.slice(-2), ["common.js", "content.js"]);
+  stored.reservation.enabled = false;
+  activeTabIsTask = false;
+  assert.equal((await resume(sender)).ok, true);
+  assert.equal(activated.length, 1);
+  assert.equal(activated[0].id, 7);
+  assert.equal(activated[0].options.active, true);
+  assert.equal(stored.reservation.enabled, true);
+  assert.equal((await resume({ id: "other", url: "chrome-extension://other/popup.html" })).ok, false);
+}
+
+Promise.all([
+  testContactFill("", "測試姓名"),
+  testContactFill("使用者自己填的姓名", "使用者自己填的姓名"),
+  testContactFill("", "測試姓名", false),
+  testDateScanStopsAfterTimeOrDetails(),
+  testTapPayRequiresManualCard(),
+  testOldConsentNoticeClearsAfterTaskStops(),
+  testDepositConsentDoesNotRecreateRulesNotice(true),
+  testDepositConsentDoesNotRecreateRulesNotice(false),
+  testMarketingSuccessTextDoesNotSubmit(),
+  testConsentResumesWithoutDisablingTask(),
+  testScopedBackgroundRelay()
+])
+  .then(() => console.log("Payment flow integration tests passed."))
+  .catch((error) => { console.error(error); process.exitCode = 1; });

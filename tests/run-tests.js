@@ -1,12 +1,14 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName, controlStateIsSelected, consentControlShouldAct, isSafeOptionalSkipText, classifyBookingStage } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, paymentFieldKind, contactFieldKind, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, isAutoConsentText, splitContactName, controlStateIsSelected, consentControlShouldAct, isSafeOptionalSkipText, classifyBookingStage } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
+const targetBookingUrl = "https://inline.app/booking/-MX-yyjCqn5gCDe7CBbr:inline-live-2/-MX-yytm3G1ci3oFvkwp?language=zh-tw";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
 assert.equal(normalizeRestaurantInput(`inline.app/booking/-company/-branch`).kind, "url");
@@ -16,6 +18,7 @@ assert.equal(normalizeRestaurantInput(`/booking/-company/-branch/form`).value, b
 assert.equal(bookingIdentity(`${bookingUrl}/form`), "-company/-branch");
 assert.equal(bookingIdentity("https://inline.app/booking/-company/-other/form"), "-company/-other");
 assert.equal(bookingIdentity("https://example.com/booking/-company/-branch/form"), "");
+assert.equal(bookingIdentity(targetBookingUrl), bookingIdentity(targetBookingUrl.replace(":inline-live-2", "%3Ainline-live-2")));
 assert.equal(canAdoptFormScope({
   senderUrl: `${bookingUrl}/form`, expectedUrl: bookingUrl,
   senderActive: true, reservationEnabled: true
@@ -32,6 +35,28 @@ assert.equal(canAdoptFormScope({
   senderUrl: `${bookingUrl}/form`, expectedUrl: bookingUrl,
   senderActive: true, reservationEnabled: false
 }), false);
+for (const step of ["payment", "checkout", "confirm", "confirmation"]) {
+  assert.equal(canAdoptFormScope({
+    senderUrl: `${bookingUrl}/${step}`, expectedUrl: bookingUrl,
+    senderActive: true, reservationEnabled: true
+  }), true);
+}
+assert.equal(canAdoptFormScope({
+  senderUrl: bookingUrl, expectedUrl: bookingUrl,
+  senderActive: true, reservationEnabled: true
+}), false);
+assert.equal(paymentFieldKind("信用卡卡號"), "number");
+assert.equal(paymentFieldKind("信用卡有效期限 (月/年)"), "expiry");
+assert.equal(paymentFieldKind("信用卡安全碼 (3-4 碼)"), "cvc");
+assert.equal(paymentFieldKind("持卡人姓名"), "holder");
+assert.equal(paymentFieldKind("簡訊驗證碼 autocomplete:one-time-code"), "");
+assert.equal(paymentFieldKind("autocomplete:cc-exp-month"), "expiryMonth");
+assert.equal(paymentFieldKind("autocomplete:cc-exp-year"), "expiryYear");
+assert.equal(contactFieldKind("type:tel"), "phone");
+assert.equal(contactFieldKind("type:email"), "email");
+assert.equal(contactFieldKind("id:familyName"), "family");
+assert.equal(contactFieldKind("持卡人姓名"), "");
+assert.equal(contactFieldKind("信用卡卡號"), "");
 assert.deepEqual(matchingBookingTabIds([
   { id: 11, url: `${bookingUrl}/form` },
   { id: 12, url: `${bookingUrl}?inline_helper=1` },
@@ -52,10 +77,6 @@ assert.equal(timeToMinutes("18:00\nNT$1,000 x 3"), 1080);
 assert.equal(dateTextToIso("2026年10月12日"), "2026-10-12");
 assert.equal(dateTextToIso("2026/11/05"), "2026-11-05");
 assert.equal(dateTextToIso("2026-02-30"), null);
-assert.equal(finalSubmitAction({ autoSubmit: false, submitAttemptedAt: 0, hasFinalButton: false }), "processing");
-assert.equal(finalSubmitAction({ autoSubmit: false, submitAttemptedAt: 0, hasFinalButton: true }), "preview");
-assert.equal(finalSubmitAction({ autoSubmit: true, submitAttemptedAt: 0, hasFinalButton: true }), "submit");
-assert.equal(finalSubmitAction({ autoSubmit: true, submitAttemptedAt: Date.now(), hasFinalButton: true }), "wait");
 assert.equal(isAutoConsentText("我已閱讀並同意規則與注意事項"), true);
 assert.equal(isAutoConsentText("我同意上述信用卡綁定及預收取消費須知"), true);
 assert.equal(isAutoConsentText("我願意收到餐廳優惠與活動資訊"), false);
@@ -100,10 +121,11 @@ const popup = fs.readFileSync(path.join(root, "popup.js"), "utf8");
 assert.ok(popup.includes(`const BUILD_VERSION = "${manifest.version}"`));
 assert.deepEqual(manifest.content_scripts[0].js, ["common.js", "content.js"]);
 assert.deepEqual(manifest.content_scripts[1].js, ["common.js", "search.js"]);
-assert.deepEqual(manifest.content_scripts[2].js, ["payment-frame.js"]);
-assert.equal(manifest.content_scripts[2].all_frames, true);
-assert.ok(manifest.host_permissions.includes("https://js.tappaysdk.com/*"));
 const popupHtml = fs.readFileSync(path.join(root, "popup.html"), "utf8");
+assert.doesNotMatch(popupHtml, /payment-card|card-vault|enable-tappay/);
+assert.doesNotMatch(popup, /FILL_CARD|CardVault|permissions\.request/);
+assert.equal(manifest.optional_host_permissions, undefined);
+assert.equal(manifest.optional_permissions, undefined);
 assert.match(popupHtml, /id="open-now"[^>]+type="button"[^>]+formnovalidate/);
 assert.match(popupHtml, /id="schedule"[^>]+type="button"[^>]+formnovalidate/);
 assert.doesNotMatch(popup, /form\.addEventListener\("submit"/);
@@ -127,15 +149,11 @@ assert.match(popup, /window\.addEventListener\("pageshow", renderInitialUpdateSt
 assert.match(popup, /document\.visibilityState === "visible"/);
 assert.match(popup, /!event\.isTrusted/);
 assert.match(popup, /manualCheckReadyAt = performance\.now\(\) \+ 500/);
-assert.match(popupHtml, /class="header-row"[\s\S]+id="live-mode" type="checkbox" hidden[\s\S]+id="mode-toggle"[^>]*>預演｜不送出<\/button>/);
+assert.match(popupHtml, /class="header-row"[\s\S]+class="mode-badge">由使用者確認<\/span>/);
 assert.doesNotMatch(popupHtml, /class="run-mode"/);
 assert.doesNotMatch(popupHtml, /id="auto-submit"/);
-assert.match(popup, /value\.autoSubmit = liveMode\.checked/);
-assert.match(popup, /liveMode\.checked = false/);
-assert.match(popup, /modeToggle\.addEventListener\("click"/);
-assert.match(popup, /selectedRunMode: liveMode\.checked \? "live" : "preview"/);
-assert.match(popup, /reservation = \{ \.\.\.reservation, autoSubmit: liveMode\.checked \}/);
-assert.match(popup, /selectedRunMode === "live"/);
+assert.match(popup, /value\.autoSubmit = false/);
+assert.doesNotMatch(popup, /modeToggle|liveMode|selectedRunMode/);
 assert.match(popup, /remove\(\["activeReservationTabId", "pendingRestaurantSearch"\]\)/);
 assert.match(popup, /flowStatusKind === "error"/);
 assert.match(popup, /flowStatusKind === "ok"/);
@@ -143,10 +161,13 @@ assert.match(popup, /asset\?\.name === "inline-reservation-helper\.zip"/);
 assert.match(popup, /updateButton\.textContent = `下載 v\$\{latestVersion\}`/);
 
 const background = fs.readFileSync(path.join(root, "background.js"), "utf8");
+assert.match(background, /storage\.local\.remove\("savedPaymentCard"\)/);
 assert.match(background, /message\.type === "PING_BACKGROUND"/);
 assert.match(background, /chrome\.runtime\.getManifest\(\)\.version/);
 assert.match(background, /flowStatusKind: message\.kind \|\| "ok"/);
 assert.match(background, /message\.type === "CHECK_FLOW_SCOPE"/);
+assert.match(background, /message\.type === "RESUME_CURRENT_FLOW"/);
+assert.match(background, /reservation: \{ \.\.\.reservation, autoSubmit: false, enabled: true \}/);
 assert.match(background, /senderTabId === activeReservationTabId/);
 assert.match(background, /activeMatchingForm/);
 assert.match(background, /InlineHelperCommon\.canAdoptFormScope/);
@@ -160,23 +181,24 @@ assert.match(background, /failedTabs\.map\(\(tab\) => chrome\.tabs\.reload\(tab\
 assert.ok(manifest.permissions.includes("scripting"));
 assert.ok(manifest.host_permissions.includes("https://inline.app/*"));
 assert.match(background, /openScopedReservationTab/);
-assert.match(background, /FLOW_SCOPE_MIGRATION = "0\.3\.12"/);
+assert.match(background, /FLOW_SCOPE_MIGRATION = "0\.3\.32"/);
 assert.match(background, /migrateUnsafeGlobalFlow/);
-assert.match(background, /if \(reservation\) updates\.reservation = \{ \.\.\.reservation, enabled: false \}/);
+assert.match(background, /if \(reservation\) updates\.reservation = \{ \.\.\.reservation, autoSubmit: false, enabled: false \}/);
 assert.match(background, /安全更新已停止舊任務/);
 assert.match(background, /pendingRestaurantSearch/);
 assert.match(background, /diner-network-api\.inline\.app\/diner-network\/search/);
 assert.doesNotMatch(background, /new URL\(/);
 const content = fs.readFileSync(path.join(root, "content.js"), "utf8");
 assert.doesNotMatch(content, /new URL\(/);
-assert.ok(content.indexOf("if (!reservation.autoSubmit)") < content.indexOf("finalButton.click()"));
+assert.doesNotMatch(content, /finalButton\.click\(\)|paymentAuthorizationButton\.click\(\)|acceptManualConsent\(/);
+assert.doesNotMatch(content, /inline 已顯示訂位成功|flowStatus: "訂位完成"|isSuccessPage\(/);
 assert.match(content, /if \(!scope\?\.active\) return/);
 assert.match(content, /if \(!reservation\?\.enabled\) return/);
 assert.doesNotMatch(content, /!reservation\?\.enabled && !helperUrl/);
 assert.match(content, /const helperUrl = new URLSearchParams\(location\.search\)\.has\("inline_helper"\)/);
 assert.ok(content.indexOf("const helperUrl =") < content.indexOf("if (!helperUrl"));
 assert.match(content, /changes\.activeReservationTabId \|\| changes\.reservation/);
-assert.match(content, /report\("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位"\)/);
+assert.match(content, /report\("待手動確認", "資料已填妥；外掛已停止，請自行核對並按最後確認訂位"/);
 assert.match(content, /function showPreviewComplete\(\)/);
 assert.match(content, /id = "inline-helper-preview-complete"/);
 assert.match(content, /尚未送出訂位/);
@@ -184,7 +206,7 @@ assert.match(content, /role="status" aria-live="assertive" aria-atomic="true"/);
 assert.match(content, /role="dialog" aria-modal="true"/);
 assert.match(content, /event\.key === "Escape"/);
 assert.match(content, /prefers-reduced-motion:no-preference/);
-assert.match(content, /showPreviewComplete\(\);[\s\S]*report\("預演完成"/);
+assert.match(content, /showPreviewComplete\(\);[\s\S]*report\("待手動確認"/);
 assert.match(content, /function showCaptchaNotice\(\)/);
 assert.match(content, /完成後插件會自動繼續/);
 assert.match(content, /showCaptchaNotice\(\);[\s\S]*report\("CAPTCHA"/);
@@ -203,40 +225,35 @@ assert.match(content, /dateResult === "unavailable"/);
 assert.match(content, /沒有可選日期/);
 assert.ok(content.indexOf("shownDate.value !== lastSelectedDate") < content.indexOf("if (adultPicker && selectBookingOption())"));
 assert.match(content, /selectedTimeIsValid = timeButtonIsInRange/);
-assert.match(content, /if \(adultPicker && selectedTimeIsValid\)/);
+assert.match(content, /if \(adultPicker && \(selectedTimeIsValid \|\| state\.timeSelectedAt\)\)/);
 assert.doesNotMatch(content, /function checkRequiredAgreements/);
 assert.doesNotMatch(content, /checkbox\.click\(\)/);
 assert.match(content, /function findManualConsentControl\(\{ modalOnly = false \} = \{\}\)/);
 assert.match(content, /InlineHelperCommon\.isAutoConsentText\(element\.textContent\)/);
 assert.match(content, /findManualConsentControl\(\{ modalOnly: true \}\)/);
 assert.match(content, /function fillContactName\(value\)/);
-assert.match(content, /function fillNextContactField\(reservation\)/);
-assert.match(content, /function contactValuesMatch\(reservation\)/);
-assert.match(content, /return "姓名"/);
-assert.match(content, /return "手機"/);
-assert.match(content, /return "Email"/);
-assert.match(content, /wanted === "朋友聚餐" \? \["朋友聚餐", "一般聚餐", "親友聚餐", "同住親友聚餐"\]/);
-assert.match(content, /function diningPurposeNeedsAttention\(\)/);
-assert.match(content, /#familyName, input\[autocomplete="family-name"\]/);
-assert.match(content, /#givenName, input\[autocomplete="given-name"\]/);
+assert.match(content, /const fields = contactFields\(\)/);
 assert.match(content, /InlineHelperCommon\.splitContactName\(value\)/);
-assert.ok(content.indexOf("fillContactName(reservation.contactName)") < content.indexOf("if (hasInteractivePaymentStep())"));
-assert.ok(content.indexOf("fillInput(['#phone'") < content.indexOf("if (hasInteractivePaymentStep())"));
-assert.ok(content.indexOf("fillInput(['#email'") < content.indexOf("if (hasInteractivePaymentStep())"));
-assert.ok(content.indexOf("fillContactName(reservation.contactName)") < content.lastIndexOf("acceptManualConsent(manualConsentControl)"));
-assert.match(content, /PAYMENT_AUTOFILL_STATUS/);
-assert.match(content, /REQUEST_PAYMENT_CARDHOLDER/);
-assert.match(content, /信用卡資料已代填並從暫存刪除/);
-assert.match(content, /預演模式沒有按下信用卡授權或送出訂位/);
-assert.match(content, /function acceptManualConsent\(control\)/);
+assert.ok(content.indexOf("fillContactName(reservation.contactName)") < content.lastIndexOf("if (hasInteractivePaymentStep())"));
+assert.ok(content.indexOf("fillField(contact.phone") < content.lastIndexOf("if (hasInteractivePaymentStep())"));
+assert.ok(content.indexOf("fillField(contact.email") < content.lastIndexOf("if (hasInteractivePaymentStep())"));
+assert.ok(content.indexOf("fillContactName(reservation.contactName)") < content.lastIndexOf("waitForManualConsent(manualConsentControl)"));
+assert.match(content, /自行填寫信用卡/);
+assert.match(content, /String\(input\.value \|\| ""\)\.trim\(\)\) return false/);
+assert.match(content, /await chrome\.storage\.local\.set\(\{ reservation: \{ \.\.\.reservation, enabled: false \} \}\)/);
+assert.match(background, /_sender\.url !== chrome\.runtime\.getURL\("popup\.html"\)/);
+assert.doesNotMatch(background, /storage\.(?:local|sync|session)\.set\([^\n]*card/);
+assert.match(content, /function waitForManualConsent\(control\)/);
+assert.match(content, /\.house-rules/);
+assert.match(content, /助手會將規則捲到底/);
+assert.match(content, /我已閱讀並同意，代我按 inline 同意/);
 assert.match(content, /function interactiveControl\(control\)/);
 assert.match(content, /function controlIsSelected\(control\)/);
 assert.match(content, /function consentControlIsActionable\(control\)/);
 assert.match(content, /InlineHelperCommon\.consentControlShouldAct/);
 assert.match(content, /if \(controlIsSelected\(target\)\) return false/);
-assert.match(content, /target\.click\(\);[\s\S]*已同意條款/);
-assert.match(content, /scrollable\.scrollTop = scrollable\.scrollHeight/);
-assert.ok(content.indexOf("acceptManualConsent(manualConsentControl)") < content.indexOf("const paymentAuthorizationButton = findPaymentAuthorizationButton()"));
+assert.match(content, /待手動同意/);
+assert.ok(content.indexOf("waitForManualConsent(manualConsentControl)") < content.indexOf("const paymentAuthorizationButton = findPaymentAuthorizationButton()"));
 assert.ok(content.includes(`const CONTENT_VERSION = "${manifest.version}"`));
 assert.match(content, /const FAST_STEP_MS = 80/);
 assert.match(content, /const NAVIGATION_STEP_MS = 240/);
@@ -244,7 +261,7 @@ assert.match(content, /function findSafeOptionalSkipButton\(\)/);
 assert.match(content, /InlineHelperCommon\.isSafeOptionalSkipText/);
 assert.match(content, /!hasBookingContactFields\(\) && !hasInteractivePaymentStep\(\)/);
 assert.match(content, /safeSkipButton\.click\(\)/);
-assert.ok(content.indexOf("safeSkipButton.click()") < content.indexOf('exactButton("完成預訂"'));
+assert.ok(content.indexOf("safeSkipButton.click()") < content.indexOf('exactButton("填寫訂位資料"'));
 assert.match(content, /function detectStage\(\)/);
 assert.match(content, /type: "FLOW_STAGE"/);
 assert.match(background, /message\.type === "FLOW_STAGE"/);
@@ -253,27 +270,15 @@ assert.match(content, /dataset\.inlineHelperVersion === CONTENT_VERSION\) return
 assert.match(content, /dataset\.inlineHelperVersion = CONTENT_VERSION/);
 assert.match(content, /type: "CONTENT_READY"/);
 assert.match(background, /message\.type === "CONTENT_READY"/);
-assert.match(background, /flowLeaseUntil: Date\.now\(\) \+ 30 \* 60_000/);
-assert.match(background, /reservationEnabled: reservation\?\.enabled \|\| leaseActive/);
-assert.match(background, /reservation: \{ \.\.\.reservation, enabled: true \}/);
-assert.match(content, /item\.getAttribute\("aria-label"\)/);
 assert.match(popup, /pageRuntimeVersion/);
+assert.match(popup, /resume-current-flow/);
+assert.match(popupHtml, /id="resume-current-flow"/);
 assert.match(content, /querySelectorAll\('\[role="checkbox"\], \[role="radio"\]'\)/);
 assert.match(content, /controlIsSelected\(choice\)/);
 assert.match(content, /function findPaymentAuthorizationButton\(\)/);
-assert.match(content, /正在開啟最終確認資料頁/);
-assert.match(content, /paymentAuthorizationButton\.click\(\)/);
-assert.ok(content.indexOf("if (hasCaptcha())") < content.indexOf("paymentAuthorizationButton.click()"));
-assert.ok(content.indexOf("if (hasInteractivePaymentStep())") < content.indexOf("paymentAuthorizationButton.click()"));
-assert.ok(content.indexOf("shownDate.value !== lastSelectedDate") < content.indexOf("paymentAuthorizationButton.click()"));
-assert.ok(content.indexOf("selectedTimeIsValid = timeButtonIsInRange") < content.indexOf("paymentAuthorizationButton.click()"));
-assert.ok(content.indexOf("const missing = unansweredRequired()") < content.indexOf("paymentAuthorizationButton.click()"));
-assert.match(content, /authorizationStepAttemptedAt/);
-assert.match(content, /delete state\.authorizationStepAttemptedAt/);
-assert.match(content, /finalAction === "processing"/);
-assert.match(content, /finalAction === "preview"/);
-assert.match(content, /finalAction === "wait"/);
-assert.match(content, /finalAction === "submit"/);
+assert.match(content, /待手動授權/);
+assert.ok(content.indexOf("const missing = unansweredRequired()") < content.indexOf("const paymentAuthorizationButton = findPaymentAuthorizationButton()"));
+assert.doesNotMatch(content, /submitAttemptedAt|authorizationStepAttemptedAt|finalAction === "submit"/);
 assert.doesNotMatch(content, /\/\(payment\|checkout\|credit-card\|deposit\)/);
 assert.match(content, /input\[autocomplete="one-time-code"\]/);
 assert.match(content, /previewCompletedAt: Date\.now\(\)/);
@@ -284,18 +289,5 @@ const search = fs.readFileSync(path.join(root, "search.js"), "utf8");
 assert.match(search, /CHECK_FLOW_SCOPE/);
 assert.match(search, /changes\.activeReservationTabId \|\| changes\.pendingRestaurantSearch/);
 
-const paymentFrame = fs.readFileSync(path.join(root, "payment-frame.js"), "utf8");
-assert.match(paymentFrame, /REQUEST_PAYMENT_FIELD/);
-assert.match(paymentFrame, /PAYMENT_FIELD_FILLED/);
-assert.match(paymentFrame, /#cc-number\.card-number/);
-assert.match(paymentFrame, /#cc-exp\.expiration-date/);
-assert.match(paymentFrame, /#cc-ccv\.ccv/);
-assert.doesNotMatch(paymentFrame, /console\.(?:log|info|warn|error)/);
-assert.match(background, /chrome\.storage\.session\.get\("paymentAutofillSession"\)/);
-assert.match(background, /delete next\[field\]/);
-assert.match(background, /chrome\.storage\.session\.remove\("paymentAutofillSession"\)/);
-assert.doesNotMatch(popup, /chrome\.storage\.local\.set\([^\n]*(?:cardNumber|cardExpiry|cardSecurityCode|paymentAutofillSession)/);
-assert.match(popupHtml, /本次信用卡代填（不保存）/);
-assert.match(popupHtml, /不會寫入一般設定、Git 或 GitHub/);
-
+execFileSync(process.execPath, [path.join(__dirname, "flow-integration.js")], { stdio: "pipe" });
 console.log("All inline reservation helper tests passed.");

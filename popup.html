@@ -14,8 +14,7 @@
             <p class="eyebrow">RESERVATION HELPER</p>
             <h1>inline 訂位快手</h1>
           </div>
-          <input id="live-mode" type="checkbox" hidden />
-          <button id="mode-toggle" class="mode-badge" type="button" title="點擊切換執行模式">預演｜不送出</button>
+          <span class="mode-badge">由使用者確認</span>
         </div>
         <p class="lead">輸入餐廳與可接受區間，其餘交給訂位助手。</p>
       </header>
@@ -30,7 +29,19 @@
         <span class="update-dot" aria-hidden="true"></span>
         <span class="update-copy"><strong>GitHub 版本（手動）</strong><span id="update-mode">尚未手動檢查</span><span id="page-runtime-version">頁面助手：尚未偵測</span></span>
         <button id="apply-update" class="update-button" type="button">檢查更新</button>
-        <span id="extension-version" class="version-pill">v0.3.31</span>
+        <span id="extension-version" class="version-pill">v0.3.44</span>
+      </section>
+
+      <section id="contact-recovery-section" class="form-section" hidden>
+        <p class="section-label">目前訂位頁</p>
+        <p class="helper">如果已在確認訂位頁，但聯絡資料仍空白，可補填本次儲存的姓名、手機和 Email；已手填的內容會保留。</p>
+        <button id="fill-contact-details" class="primary" type="button">補填目前頁面的聯絡資料</button>
+      </section>
+
+      <section id="resume-section" class="form-section" hidden>
+        <p class="section-label">目前訂位頁</p>
+        <p class="helper">如果先前任務因更新而停止，可接手目前分頁；助手會將規則捲到底，等你明確同意後繼續填資料，並停在付款及最後確認前。</p>
+        <button id="resume-current-flow" class="primary" type="button">繼續目前訂位頁</button>
       </section>
 
       <form id="reservation-form">
@@ -85,24 +96,7 @@
           </div>
         </section>
 
-        <details class="payment-details">
-          <summary>本次信用卡代填（不保存）</summary>
-          <div class="details-body">
-            <label class="check-row">
-              <input id="payment-autofill" type="checkbox" />
-              <span>需要信用卡時自動填入</span>
-            </label>
-            <div id="payment-fields" class="payment-fields" hidden>
-              <label>持卡人姓名<input id="cardholder-name" autocomplete="off" placeholder="與信用卡相同" /></label>
-              <label>信用卡號<input id="card-number" type="text" inputmode="numeric" autocomplete="off" maxlength="23" placeholder="僅供本次代填" /></label>
-              <div class="grid">
-                <label>到期日<input id="card-expiry" type="text" inputmode="numeric" autocomplete="off" maxlength="5" placeholder="MM/YY" /></label>
-                <label>安全碼<input id="card-security-code" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" placeholder="CVV" /></label>
-              </div>
-            </div>
-            <p class="payment-privacy">資料只暫存在這次 Chrome 工作階段，逐欄填入後立即刪除；不會寫入一般設定、Git 或 GitHub。OTP 與真人驗證仍由你操作。</p>
-          </div>
-        </details>
+      </form>
 
         <details>
           <summary>排程與進階選項（立即找位不使用）</summary>
@@ -120,10 +114,9 @@
           <button id="schedule" type="button" formnovalidate>設定排程</button>
         </div>
         <button id="cancel" class="quiet" type="button">取消排程</button>
-      </form>
 
       <section id="status" role="status" tabindex="-1" aria-live="polite" aria-atomic="true"></section>
-      <p class="footnote">CAPTCHA 與 OTP 需手動；信用卡可選擇本次暫存代填。</p>
+      <p class="footnote">信用卡資料、CAPTCHA、OTP、付款及最後確認由你在 inline 頁面操作。</p>
     </main>
     <script src="common.js"></script>
     <script src="update-config.js"></script>

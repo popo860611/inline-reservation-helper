@@ -1,67 +1,21 @@
 const ALARM_NAME = "inline-reservation-open";
 const PREP_ALARM_NAME = "inline-reservation-prepare";
-const FLOW_SCOPE_MIGRATION = "0.3.12";
+const FLOW_SCOPE_MIGRATION = "0.3.32";
 const RELOAD_INLINE_AFTER_RESTART = "reloadInlineAfterExtensionRestart";
 importScripts("common.js");
-let paymentSessionQueue = Promise.resolve();
-
-function senderMatchesActiveFlow(sender, activeReservationTabId, flowLeaseUntil) {
-  return Number.isInteger(sender.tab?.id) && sender.tab.id === activeReservationTabId && Number(flowLeaseUntil || 0) > Date.now();
-}
-
-function paymentFieldFromSenderUrl(value) {
-  let decoded = String(value || "");
-  try { decoded = decodeURIComponent(decoded); } catch (_error) {}
-  if (/"type"\s*:\s*"card-number"/.test(decoded)) return "cardNumber";
-  if (/"type"\s*:\s*"expiration-date"/.test(decoded)) return "expiry";
-  if (/"type"\s*:\s*"ccv"/.test(decoded)) return "securityCode";
-  return null;
-}
-
-async function readActivePaymentSession(sender) {
-  const [{ activeReservationTabId, flowLeaseUntil }, { paymentAutofillSession }, { paymentAutofillResult }] = await Promise.all([
-    chrome.storage.local.get(["activeReservationTabId", "flowLeaseUntil"]),
-    chrome.storage.session.get("paymentAutofillSession"),
-    chrome.storage.session.get("paymentAutofillResult")
-  ]);
-  if (!senderMatchesActiveFlow(sender, activeReservationTabId, flowLeaseUntil)) return { active: false, completed: false };
-  if (paymentAutofillResult?.tabId === sender.tab.id) return { active: false, completed: true };
-  if (!paymentAutofillSession || Number(paymentAutofillSession.expiresAt || 0) <= Date.now()) {
-    await chrome.storage.session.remove("paymentAutofillSession");
-    return { active: false, completed: false };
-  }
-  return { active: true, completed: false, session: paymentAutofillSession };
-}
-
-function clearPaymentField(field, sender) {
-  paymentSessionQueue = paymentSessionQueue.then(async () => {
-    const state = await readActivePaymentSession(sender);
-    if (!state.active || !state.session || !(field in state.session)) return;
-    const next = { ...state.session };
-    delete next[field];
-    const remaining = ["cardholderName", "cardNumber", "expiry", "securityCode"].some((key) => Boolean(next[key]));
-    if (remaining) {
-      await chrome.storage.session.set({ paymentAutofillSession: next });
-    } else {
-      await chrome.storage.session.remove("paymentAutofillSession");
-      await chrome.storage.session.set({ paymentAutofillResult: { tabId: sender.tab.id, completedAt: Date.now() } });
-    }
-  });
-  return paymentSessionQueue;
-}
 
 async function migrateUnsafeGlobalFlow() {
   const { flowScopeMigration, reservation } = await chrome.storage.local.get([
     "flowScopeMigration", "reservation"
   ]);
   if (flowScopeMigration === FLOW_SCOPE_MIGRATION) return;
-  await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"]);
+  await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch", "lastSelectedDate"]);
   const updates = {
     flowScopeMigration: FLOW_SCOPE_MIGRATION,
-    flowStatus: "安全更新已停止舊任務；請從插件重新開始找位",
+    flowStatus: "安全更新已停止舊任務；先前的訂位成功狀態未經驗證，請在 inline 或通知中確認",
     flowStatusKind: "ok"
   };
-  if (reservation) updates.reservation = { ...reservation, enabled: false };
+  if (reservation) updates.reservation = { ...reservation, autoSubmit: false, enabled: false };
   await chrome.storage.local.set(updates);
 }
 
@@ -78,7 +32,6 @@ async function reloadActiveReservationTabAfterUpdate() {
     const results = await Promise.allSettled(injectableTabs.map(async (tab) => {
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js"] });
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["payment-frame.js"] });
     }));
     const failedTabs = injectableTabs.filter((_tab, index) => results[index].status === "rejected");
     await Promise.allSettled(failedTabs.map((tab) => chrome.tabs.reload(tab.id)));
@@ -91,7 +44,12 @@ async function reloadActiveReservationTabAfterUpdate() {
   } catch (_error) {}
 }
 
-const extensionReady = reloadActiveReservationTabAfterUpdate();
+// Remove the encrypted card saved by the retired credit-card feature.
+const retiredCardCleanup = Promise.all([
+  chrome.storage.local.remove("savedPaymentCard"),
+  chrome.storage.session?.remove(["paymentAutofillSession", "paymentAutofillResult"])
+]);
+const extensionReady = Promise.all([reloadActiveReservationTabAfterUpdate(), retiredCardCleanup]);
 
 function utf8ToBase64(value) {
   const bytes = new TextEncoder().encode(value);
@@ -147,7 +105,6 @@ async function openReservation(reservation) {
     throw new Error("餐廳網址無效，請貼上 inline 官方訂位網址或輸入餐廳名稱。");
   }
   reservation.restaurantQuery = normalized.value;
-  await chrome.storage.local.set({ flowLeaseUntil: Date.now() + 30 * 60_000 });
   if (normalized.kind === "name") {
     try {
       const resolved = await resolveRestaurantName(reservation.restaurantQuery);
@@ -238,53 +195,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "PING_BACKGROUND") {
-    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
-    return false;
-  }
-
-  if (message.type === "PAYMENT_AUTOFILL_STATUS") {
-    readActivePaymentSession(_sender)
-      .then(({ active, completed }) => sendResponse({ ok: true, active, completed }))
-      .catch(() => sendResponse({ ok: false, active: false, completed: false }));
-    return true;
-  }
-
-  if (message.type === "REQUEST_PAYMENT_CARDHOLDER") {
-    readActivePaymentSession(_sender).then((state) => {
-      const senderUrl = String(_sender.url || _sender.tab?.url || "");
-      const allowed = senderUrl.startsWith("https://inline.app/booking/");
-      sendResponse({ ok: allowed && state.active, value: allowed && state.active ? state.session.cardholderName || "" : "" });
-    }).catch(() => sendResponse({ ok: false, value: "" }));
-    return true;
-  }
-
-  if (message.type === "REQUEST_PAYMENT_FIELD") {
-    readActivePaymentSession(_sender).then((state) => {
-      const field = paymentFieldFromSenderUrl(_sender.url);
-      const allowed = String(_sender.url || "").startsWith("https://js.tappaysdk.com/") && field;
-      sendResponse({ ok: Boolean(allowed && state.active), field, value: allowed && state.active ? state.session[field] || "" : "" });
-    }).catch(() => sendResponse({ ok: false, value: "" }));
-    return true;
-  }
-
-  if (message.type === "PAYMENT_FIELD_FILLED") {
-    const inferredField = paymentFieldFromSenderUrl(_sender.url);
-    const field = message.field === "cardholderName" ? "cardholderName" : inferredField;
-    const senderUrl = String(_sender.url || _sender.tab?.url || "");
-    const allowed = field === "cardholderName"
-      ? senderUrl.startsWith("https://inline.app/booking/")
-      : senderUrl.startsWith("https://js.tappaysdk.com/") && message.field === inferredField;
-    if (!allowed) {
-      sendResponse({ ok: false });
-      return false;
-    }
-    clearPaymentField(field, _sender).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
-    return true;
-  }
-
-  if (message.type === "CLEAR_PAYMENT_AUTOFILL") {
-    chrome.storage.session.remove(["paymentAutofillSession", "paymentAutofillResult"])
-      .then(() => sendResponse({ ok: true }));
+    extensionReady.then(() => sendResponse({ ok: true, version: chrome.runtime.getManifest().version }))
+      .catch(() => sendResponse({ ok: false, error: "安全更新尚未完成" }));
     return true;
   }
 
@@ -310,28 +222,97 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === "CHECK_FLOW_SCOPE") {
     extensionReady.then(() => chrome.storage.local.get([
-      "activeReservationTabId", "lastOpenedUrl", "reservation", "flowLeaseUntil"
-    ])).then(async ({ activeReservationTabId, lastOpenedUrl, reservation, flowLeaseUntil }) => {
+      "activeReservationTabId", "lastOpenedUrl", "reservation"
+    ])).then(async ({ activeReservationTabId, lastOpenedUrl, reservation }) => {
       const senderTabId = _sender.tab?.id;
-      let active = Number.isInteger(senderTabId) && senderTabId === activeReservationTabId;
-      const leaseActive = Number(flowLeaseUntil || 0) > Date.now();
+      let active = Number.isInteger(senderTabId) && senderTabId === activeReservationTabId && _sender.tab?.active === true;
       const activeMatchingForm = Number.isInteger(senderTabId) && InlineHelperCommon.canAdoptFormScope({
         senderUrl: _sender.tab?.url,
         expectedUrl: lastOpenedUrl || reservation?.restaurantQuery,
         senderActive: _sender.tab?.active,
-        reservationEnabled: reservation?.enabled || leaseActive
+        reservationEnabled: reservation?.enabled
       });
-      if ((!active || !reservation?.enabled) && leaseActive && activeMatchingForm) {
+      const activeMatchingStage = reservation?.enabled && _sender.tab?.active &&
+        ["contact", "payment", "verification", "confirmation"].includes(message.stage) &&
+        InlineHelperCommon.bookingIdentity(_sender.tab?.url) &&
+        InlineHelperCommon.bookingIdentity(_sender.tab?.url) === InlineHelperCommon.bookingIdentity(lastOpenedUrl || reservation.restaurantQuery);
+      if (!active && reservation?.enabled && (activeMatchingForm || activeMatchingStage)) {
         active = true;
         await chrome.storage.local.set({
           activeReservationTabId: senderTabId,
-          reservation: { ...reservation, enabled: true },
           flowStatus: "已接手目前顯示的訂位資料頁",
           flowStatusKind: "ok"
         });
       }
-      sendResponse({ active });
-    });
+      if (!active && reservation?.enabled && _sender.tab?.active &&
+          InlineHelperCommon.bookingIdentity(_sender.tab?.url) === InlineHelperCommon.bookingIdentity(lastOpenedUrl || reservation.restaurantQuery)) {
+        await chrome.storage.local.set({
+          flowStatus: "目前訂位頁未接手流程；請回到外掛開啟的訂位分頁，或重新開始找位",
+          flowStatusKind: "error"
+        });
+      }
+      sendResponse({ active, reason: active ? "" : "此分頁不是目前任務的訂位頁" });
+    }).catch(() => sendResponse({ active: false, reason: "無法確認目前訂位分頁，請重新開啟外掛檢查狀態" }));
+    return true;
+  }
+
+  if (message.type === "RESUME_CURRENT_FLOW") {
+    (async () => {
+      if (_sender.id !== chrome.runtime.id || _sender.url !== chrome.runtime.getURL("popup.html")) {
+        return { ok: false, error: "只能從外掛畫面接手訂位頁。" };
+      }
+      await extensionReady;
+      const { reservation, lastOpenedUrl, activeReservationTabId } = await chrome.storage.local.get([
+        "reservation", "lastOpenedUrl", "activeReservationTabId"
+      ]);
+      const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const expectedIdentity = InlineHelperCommon.bookingIdentity(lastOpenedUrl || reservation?.restaurantQuery);
+      let taskTab = null;
+      if (Number.isInteger(activeReservationTabId)) {
+        try { taskTab = await chrome.tabs.get(activeReservationTabId); } catch (_error) {}
+      }
+      const matching = (tab) => Number.isInteger(tab?.id) &&
+        InlineHelperCommon.bookingIdentity(tab.url) === expectedIdentity;
+      const tab = matching(taskTab) ? taskTab : matching(activeTab) ? activeTab : null;
+      if (!reservation || !expectedIdentity || !tab) {
+        return { ok: false, error: "請先切換到這次任務的 inline 訂位分頁。" };
+      }
+      if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
+      await chrome.storage.local.set({
+        activeReservationTabId: tab.id,
+        reservation: { ...reservation, autoSubmit: false, enabled: true },
+        flowStatus: "正在接手目前訂位頁",
+        flowStatusKind: "ok"
+      });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js"] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+      return { ok: true };
+    })().then(sendResponse).catch(() => sendResponse({ ok: false, error: "無法接手目前頁面，請重新整理 inline 頁面後再試。" }));
+    return true;
+  }
+
+  if (message.type === "FILL_CONTACT_FROM_POPUP") {
+    (async () => {
+      if (_sender.id !== chrome.runtime.id || _sender.url !== chrome.runtime.getURL("popup.html")) {
+        return { ok: false, error: "只能從外掛畫面補填聯絡資料。" };
+      }
+      const { reservation, lastOpenedUrl } = await chrome.storage.local.get(["reservation", "lastOpenedUrl"]);
+      const expectedIdentity = InlineHelperCommon.bookingIdentity(lastOpenedUrl || reservation?.restaurantQuery);
+      if (!reservation || !expectedIdentity) return { ok: false, error: "找不到這次訂位資料，請從外掛重新開始。" };
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!Number.isInteger(tab?.id) || !/\/form\/?(?:[?#]|$)/i.test(tab.url || "") ||
+          InlineHelperCommon.bookingIdentity(tab.url) !== expectedIdentity) {
+        return { ok: false, error: "請先切換到這次任務的 inline 訂位資料頁。" };
+      }
+      await chrome.storage.local.set({ activeReservationTabId: tab.id });
+      try {
+        return await chrome.tabs.sendMessage(tab.id, { type: "FILL_CONTACT_DETAILS" });
+      } catch (_error) {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["common.js"] });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] });
+        return chrome.tabs.sendMessage(tab.id, { type: "FILL_CONTACT_DETAILS" });
+      }
+    })().then(sendResponse).catch(() => sendResponse({ ok: false, error: "頁面助手沒有回應，請重新整理 inline 頁面後再試。" }));
     return true;
   }
 
@@ -380,8 +361,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     Promise.all([
       chrome.alarms.clear(ALARM_NAME),
       chrome.alarms.clear(PREP_ALARM_NAME),
-      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch", "flowLeaseUntil"]),
-      chrome.storage.session.remove(["paymentAutofillSession", "paymentAutofillResult"])
+      chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"])
     ]).then(() => sendResponse({ ok: true }));
     return true;
   }
