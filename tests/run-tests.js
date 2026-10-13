@@ -5,7 +5,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 require(path.join(root, "common.js"));
 
-const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName } = globalThis.InlineHelperCommon;
+const { normalizeRestaurantInput, setUrlQueryParams, bookingIdentity, canAdoptFormScope, matchingBookingTabIds, restaurantMatchScore, selectRestaurantMatch, timeToMinutes, dateTextToIso, finalSubmitAction, isAutoConsentText, splitContactName, controlStateIsSelected } = globalThis.InlineHelperCommon;
 const bookingUrl = "https://inline.app/booking/-company/-branch";
 
 assert.equal(normalizeRestaurantInput(bookingUrl).kind, "url");
@@ -61,6 +61,9 @@ assert.equal(isAutoConsentText("我同意上述信用卡綁定及預收取消費
 assert.equal(isAutoConsentText("我願意收到餐廳優惠與活動資訊"), false);
 assert.deepEqual(splitContactName("張廷菘"), { familyName: "張", givenName: "廷菘" });
 assert.deepEqual(splitContactName("王 小明"), { familyName: "王", givenName: "小明" });
+assert.equal(controlStateIsSelected({ ariaChecked: "true" }), true);
+assert.equal(controlStateIsSelected({ dataState: "checked" }), true);
+assert.equal(controlStateIsSelected({ checked: false, ariaChecked: "false" }), false);
 assert.equal(restaurantMatchScore("辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", "辛殿信義店"), 1);
 assert.equal(selectRestaurantMatch([
   { name: "辛殿麻辣鍋 Xin Dian Hotpot 信義店 Xinyi", bookingLink: bookingUrl },
@@ -105,6 +108,9 @@ assert.doesNotMatch(popupHtml, /id="auto-submit"/);
 assert.match(popup, /value\.autoSubmit = liveMode\.checked/);
 assert.match(popup, /liveMode\.checked = false/);
 assert.match(popup, /modeToggle\.addEventListener\("click"/);
+assert.match(popup, /selectedRunMode: liveMode\.checked \? "live" : "preview"/);
+assert.match(popup, /reservation = \{ \.\.\.reservation, autoSubmit: liveMode\.checked \}/);
+assert.match(popup, /selectedRunMode === "live"/);
 assert.match(popup, /remove\(\["activeReservationTabId", "pendingRestaurantSearch"\]\)/);
 assert.match(popup, /flowStatusKind === "error"/);
 assert.match(popup, /flowStatusKind === "ok"/);
@@ -183,9 +189,19 @@ assert.ok(content.indexOf("fillInput(['#phone'") < content.indexOf("if (hasInter
 assert.ok(content.indexOf("fillInput(['#email'") < content.indexOf("if (hasInteractivePaymentStep())"));
 assert.match(content, /訂位資料已自動填妥；信用卡、OTP 或付款驗證請由你手動完成/);
 assert.match(content, /function acceptManualConsent\(control\)/);
+assert.match(content, /function interactiveControl\(control\)/);
+assert.match(content, /function controlIsSelected\(control\)/);
+assert.match(content, /if \(controlIsSelected\(target\)\) return false/);
+assert.match(content, /target\.click\(\);[\s\S]*已同意條款/);
 assert.match(content, /scrollable\.scrollTop = scrollable\.scrollHeight/);
-assert.match(content, /control\.click\(\);[\s\S]*已同意條款/);
 assert.ok(content.indexOf("acceptManualConsent(manualConsentControl)") < content.indexOf("const paymentAuthorizationButton = findPaymentAuthorizationButton()"));
+assert.match(content, /const CONTENT_VERSION = "0\.3\.24"/);
+assert.match(content, /dataset\.inlineHelperVersion = CONTENT_VERSION/);
+assert.match(content, /type: "CONTENT_READY"/);
+assert.match(background, /message\.type === "CONTENT_READY"/);
+assert.match(popup, /pageRuntimeVersion/);
+assert.match(content, /querySelectorAll\('\[role="checkbox"\], \[role="radio"\]'\)/);
+assert.match(content, /controlIsSelected\(choice\)/);
 assert.match(content, /function findPaymentAuthorizationButton\(\)/);
 assert.match(content, /正在開啟最終確認資料頁/);
 assert.match(content, /paymentAuthorizationButton\.click\(\)/);

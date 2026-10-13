@@ -149,6 +149,10 @@
     return { familyName: name.slice(0, 1), givenName: name.slice(1) };
   }
 
+  function controlStateIsSelected({ checked, ariaChecked, ariaPressed, dataState } = {}) {
+    return checked === true || ariaChecked === "true" || ariaPressed === "true" || dataState === "checked";
+  }
+
   globalThis.InlineHelperCommon = {
     normalizeRestaurantInput,
     setUrlQueryParams,
@@ -162,6 +166,7 @@
     dateTextToIso,
     finalSubmitAction,
     isAutoConsentText,
-    splitContactName
+    splitContactName,
+    controlStateIsSelected
   };
 })();

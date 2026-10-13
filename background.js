@@ -187,6 +187,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "CONTENT_READY") {
+    chrome.storage.local.set({
+      loadedPageHelperVersion: String(message.version || "未知"),
+      loadedPageHelperUrl: String(_sender.tab?.url || message.url || "")
+    }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (message.type === "CHECK_FLOW_SCOPE") {
     extensionReady.then(() => chrome.storage.local.get([
       "activeReservationTabId", "lastOpenedUrl", "reservation"

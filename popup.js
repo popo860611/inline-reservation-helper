@@ -20,10 +20,11 @@ const updateMode = document.querySelector("#update-mode");
 const updateButton = document.querySelector("#apply-update");
 const reloadCard = document.querySelector("#reload-card");
 const backgroundVersionDetail = document.querySelector("#background-version-detail");
+const pageRuntimeVersion = document.querySelector("#page-runtime-version");
 const reloadExtensionButton = document.querySelector("#reload-extension");
 const liveMode = document.querySelector("#live-mode");
 const modeToggle = document.querySelector("#mode-toggle");
-const BUILD_VERSION = "0.3.23";
+const BUILD_VERSION = "0.3.24";
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -65,6 +66,10 @@ async function checkBackgroundVersion() {
     if (response?.ok && response.version) backgroundVersion = response.version;
   } catch (_error) {}
 
+  const { loadedPageHelperVersion } = await chrome.storage.local.get("loadedPageHelperVersion");
+  pageRuntimeVersion.textContent = loadedPageHelperVersion
+    ? `頁面助手 v${loadedPageHelperVersion}${loadedPageHelperVersion === BUILD_VERSION ? "｜已套用" : "｜請重新載入 inline 頁面"}`
+    : "頁面助手：開啟 inline 後才會偵測";
   const ready = backgroundVersion === BUILD_VERSION;
   reloadCard.hidden = ready;
   backgroundVersionDetail.textContent = `畫面版本 ${BUILD_VERSION}｜背景版本 ${backgroundVersion}`;
@@ -146,9 +151,13 @@ reloadExtensionButton.addEventListener("click", async () => {
   chrome.runtime.reload();
 });
 
-modeToggle.addEventListener("click", () => {
+modeToggle.addEventListener("click", async () => {
   liveMode.checked = !liveMode.checked;
   renderRunMode();
+  const { reservation } = await chrome.storage.local.get("reservation");
+  const updates = { selectedRunMode: liveMode.checked ? "live" : "preview" };
+  if (reservation) updates.reservation = { ...reservation, autoSubmit: liveMode.checked };
+  await chrome.storage.local.set(updates);
   setStatus(
     liveMode.checked
       ? "已切換為實際模式；條款與金額會自動確認，只有需要填卡、OTP 或 CAPTCHA 時才會停止。"
@@ -217,9 +226,11 @@ async function save(reservation, scheduling = false) {
 }
 
 async function restore() {
-  const { reservation, lastOpenedAt, flowStatus, flowStatusKind, lastSelectedDate } = await chrome.storage.local.get([
-    "reservation", "lastOpenedAt", "flowStatus", "flowStatusKind", "lastSelectedDate"
+  const { reservation, lastOpenedAt, flowStatus, flowStatusKind, lastSelectedDate, selectedRunMode } = await chrome.storage.local.get([
+    "reservation", "lastOpenedAt", "flowStatus", "flowStatusKind", "lastSelectedDate", "selectedRunMode"
   ]);
+  liveMode.checked = selectedRunMode === "live" || (selectedRunMode === undefined && reservation?.autoSubmit === true);
+  renderRunMode();
   fields.dateStart.value ||= localDate(1);
   fields.dateEnd.value ||= localDate(7);
   if (reservation) {

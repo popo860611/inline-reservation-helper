@@ -1,6 +1,10 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
+  const CONTENT_VERSION = "0.3.24";
   let busy = false;
+
+  document.documentElement.dataset.inlineHelperVersion = CONTENT_VERSION;
+  chrome.runtime.sendMessage({ type: "CONTENT_READY", version: CONTENT_VERSION, url: location.href }).catch(() => {});
 
   function report(status, detail, kind = "ok") {
     chrome.runtime.sendMessage({ type: "FLOW_STATUS", status, detail, kind }).catch(() => {});
@@ -297,32 +301,52 @@
   }
 
   function chooseDiningPurpose(reservation) {
-    const hiddenRequired = [...document.querySelectorAll('input[required]')].filter((input) => !visible(input));
-    for (const input of hiddenRequired) {
-      const group = findRequiredChoiceGroup(input);
-      if (!group || !/用餐目的/.test(group.parent.innerText || "")) continue;
-      if (group.choices.some((choice) => choice.getAttribute("aria-checked") === "true")) return false;
-      const wanted = String(reservation.diningPurpose || "朋友聚餐");
-      const choice = group.choices.find((item) => (item.textContent || "").trim() === wanted) || group.choices[0];
-      if (!choice) return false;
-      choice.click();
-      report("填目的", `已選擇用餐目的：${(choice.textContent || "").trim()}`);
-      return true;
-    }
-    return false;
+    const wanted = String(reservation.diningPurpose || "朋友聚餐").trim();
+    const choices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((choice) =>
+      visible(choice) && (choice.textContent || "").trim() === wanted
+    );
+    const choice = choices.find((item) => {
+      let parent = item.parentElement;
+      for (let depth = 0; depth < 4 && parent; depth += 1, parent = parent.parentElement) {
+        if (/用餐目的/.test(parent.innerText || "")) return true;
+      }
+      return false;
+    }) || choices[0];
+    if (!choice || controlIsSelected(choice)) return false;
+    choice.click();
+    report("填目的", `已選擇用餐目的：${wanted}`);
+    return true;
   }
 
   function findManualConsentControl() {
-    return [...document.querySelectorAll('button, [role="button"], label')].find((element) =>
+    return [...document.querySelectorAll('button, [role="button"], [role="checkbox"], label')].find((element) =>
       visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent)
     ) || null;
   }
 
+  function interactiveControl(control) {
+    if (!control) return null;
+    if (control.tagName === "LABEL" && control.htmlFor) return document.getElementById(control.htmlFor) || control;
+    return control.querySelector?.('input, button, [role="checkbox"], [role="radio"], [role="switch"]') || control;
+  }
+
+  function controlIsSelected(control) {
+    const target = interactiveControl(control);
+    return InlineHelperCommon.controlStateIsSelected({
+      checked: target?.checked,
+      ariaChecked: target?.getAttribute?.("aria-checked"),
+      ariaPressed: target?.getAttribute?.("aria-pressed"),
+      dataState: target?.getAttribute?.("data-state")
+    });
+  }
+
   function acceptManualConsent(control) {
     if (!control) return false;
-    const disabled = control.disabled || control.getAttribute("aria-disabled") === "true";
+    const target = interactiveControl(control);
+    if (controlIsSelected(target)) return false;
+    const disabled = target.disabled || target.getAttribute("aria-disabled") === "true";
     if (disabled) {
-      const scope = control.closest('[role="dialog"], [aria-modal="true"]') || document;
+      const scope = target.closest('[role="dialog"], [aria-modal="true"]') || document;
       const scrollable = [scope, ...scope.querySelectorAll("div, section, main")].find((element) =>
         element.scrollHeight > element.clientHeight + 8
       );
@@ -334,7 +358,7 @@
       setTimeout(advance, 400);
       return true;
     }
-    control.click();
+    target.click();
     report("已同意條款", "已按下規則與注意事項的同意按鈕；尚未填寫或授權信用卡");
     return true;
   }
