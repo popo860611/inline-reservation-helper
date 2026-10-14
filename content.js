@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.47";
+  const CONTENT_VERSION = "0.3.48";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -366,15 +366,19 @@
     );
     if (selected) return selected;
     // Some inline pages show selection only in the bottom booking summary.
-    if (!findBookingDetailsButton()) return null;
+    if (!findBookingDetailsButton({ allowSelectionContinue: true })) return null;
     return [...document.querySelectorAll("button")].find((button) => visible(button) &&
       !button.classList.contains("time-slot") && /^\s*(?:時段\s*)?\d{1,2}[:：]\d{2}\s*$/.test(button.textContent || "")) || null;
   }
 
-  function findBookingDetailsButton() {
+  function findBookingDetailsButton({ allowSelectionContinue = false } = {}) {
+    const selectionPage = allowSelectionContinue && document.querySelector("#adult-picker") &&
+      !/\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname) &&
+      !hasBookingContactFields() && !hasInteractivePaymentStep();
     return [...document.querySelectorAll("button")].find((button) => visible(button) &&
       !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
-      /^(?:下一步(?:[，,:：\s]*填寫(?:訂位)?資料)?|填寫(?:訂位)?(?:資料|聯絡資訊))$/.test(buttonText(button)));
+      (/^(?:下一步(?:[，,:：\s]*填寫(?:訂位)?資料)?|填寫(?:訂位)?(?:資料|聯絡資訊))$/.test(buttonText(button)) ||
+       (selectionPage && buttonText(button) === "完成預訂")));
   }
 
   function timeButtonIsInRange(button, start, end) {
@@ -753,7 +757,7 @@
         }
       }
       if (adultPicker && (selectedTimeIsValid || state.timeSelectedAt)) {
-        const bookingButton = findBookingDetailsButton();
+        const bookingButton = findBookingDetailsButton({ allowSelectionContinue: true });
         if (bookingButton && !bookingButton.disabled &&
             (!state.bookingButtonClickedAt || (selectedTimeIsValid &&
               Date.now() - state.bookingButtonClickedAt >= 1500 &&

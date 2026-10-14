@@ -220,10 +220,10 @@ async function testDateRangeScansEveryDay() {
   assert.ok(statuses.some((message) => message.status === "日期載入失敗"));
 }
 
-async function testTimeSelectionAcceptance(accept, footerOnly = false) {
+async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel = "下一步，填寫訂位資料", onForm = false) {
   let now = 10000;
   class TestDate extends Date { static now() { return now; } }
-  let selected = false;
+  let selected = onForm;
   let slotClicks = 0;
   let nextClicks = 0;
   let redirects = 0;
@@ -239,7 +239,7 @@ async function testTimeSelectionAcceptance(accept, footerOnly = false) {
   const summary = { ...slot, textContent: "17:30", disabled: false,
     classList: { contains: () => false },
     click: () => { throw new Error("A booking summary is not an available slot"); } };
-  const next = { ...summary, textContent: "下一步，填寫訂位資料",
+  const next = { ...summary, textContent: nextLabel,
     get disabled() { return !selected; }, click: () => { nextClicks += 1; } };
   const chrome = {
     runtime: { sendMessage: async () => ({ active: true }), onMessage: { addListener() {} } },
@@ -251,7 +251,7 @@ async function testTimeSelectionAcceptance(accept, footerOnly = false) {
       querySelectorAll: (selector) => selector === "button" ? [slot, summary, next] : [] },
     chrome, InlineHelperCommon: common, URLSearchParams, Date: TestDate,
     btoa: (value) => Buffer.from(value, "binary").toString("base64"),
-    location: { href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1", pathname: "/booking/-company/-branch", replace: () => { redirects += 1; } },
+    location: { href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1", pathname: onForm ? "/booking/-company/-branch/form" : "/booking/-company/-branch", replace: () => { redirects += 1; } },
     sessionStorage: { getItem: (key) => saved.get(key) || null, setItem: (key, value) => saved.set(key, value) },
     MutationObserver: class { observe() {} disconnect() {} },
     getComputedStyle: () => ({ display: "block", visibility: "visible" }),
@@ -268,7 +268,11 @@ async function testTimeSelectionAcceptance(accept, footerOnly = false) {
     timers.delete(id); callback();
     await new Promise(setImmediate);
   }
-  if (accept) {
+  if (onForm) {
+    assert.equal(slotClicks, 0);
+    assert.equal(nextClicks, 0, "Never click 完成預訂 on a contact form");
+    assert.equal(redirects, 0);
+  } else if (accept) {
     assert.equal(slotClicks, 1);
     assert.equal(nextClicks, 1, "Recognize inline selection in the footer and the next-button wording");
     assert.equal(redirects, 0);
@@ -775,6 +779,8 @@ Promise.all([
   testWaitingFlowRecovers(),
   testDateRangeScansEveryDay(),
   testTimeSelectionAcceptance(true),
+  testTimeSelectionAcceptance(true, false, "完成預訂"),
+  testTimeSelectionAcceptance(true, false, "完成預訂", true),
   testTimeSelectionAcceptance(false),
   testTimeSelectionAcceptance(false, true),
   testTapPayRequiresManualCard(),

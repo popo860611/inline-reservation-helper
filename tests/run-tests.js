@@ -261,7 +261,7 @@ assert.match(content, /function findSafeOptionalSkipButton\(\)/);
 assert.match(content, /InlineHelperCommon\.isSafeOptionalSkipText/);
 assert.match(content, /!hasBookingContactFields\(\) && !hasInteractivePaymentStep\(\)/);
 assert.match(content, /safeSkipButton\.click\(\)/);
-assert.ok(content.indexOf("safeSkipButton.click()") < content.indexOf('const bookingButton = findBookingDetailsButton()'));
+assert.ok(content.indexOf("safeSkipButton.click()") < content.indexOf('const bookingButton = findBookingDetailsButton('));
 assert.match(content, /function detectStage\(\)/);
 assert.match(content, /type: "FLOW_STAGE"/);
 assert.match(background, /message\.type === "FLOW_STAGE"/);
