@@ -1,15 +1,52 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.31";
+  const CONTENT_VERSION = "0.3.50";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
   let busy = false;
+  let pendingAdvance = false;
+  let advanceTimer = null;
+  let scheduledDelay = Infinity;
+  let dateNavigationPending = false;
+  let dateNavigationAt = 0;
+
+  // Keep the first queued check: continuous DOM updates must not postpone it.
+  function scheduleAdvance(delay = 0) {
+    if (advanceTimer !== null && scheduledDelay <= delay) return;
+    if (advanceTimer !== null) clearTimeout(advanceTimer);
+    scheduledDelay = delay;
+    advanceTimer = setTimeout(() => {
+      advanceTimer = null;
+      scheduledDelay = Infinity;
+      advance();
+    }, delay);
+  }
 
   document.documentElement.dataset.inlineHelperVersion = CONTENT_VERSION;
   chrome.runtime.sendMessage({ type: "CONTENT_READY", version: CONTENT_VERSION, url: location.href }).catch(() => {});
 
+  // Earlier content-script instances can remain alive after an extension reload.
+  // Keep their stale notice hidden even if they recreate its host later.
+  const CONSENT_SUPPRESSION_STYLE_ID = "inline-helper-consent-suppression";
+  function setConsentNoticeSuppressed(suppressed) {
+    if (!document.querySelector(`#${CONSENT_SUPPRESSION_STYLE_ID}`) && document.createElement) {
+      const style = document.createElement("style");
+      style.id = CONSENT_SUPPRESSION_STYLE_ID;
+      style.textContent = 'html[data-inline-helper-consent-suppressed="true"] #inline-helper-consent-notice{display:none!important}';
+      document.documentElement.appendChild(style);
+    }
+    const value = suppressed ? "true" : "false";
+    if (document.documentElement.dataset.inlineHelperConsentSuppressed !== value) {
+      document.documentElement.dataset.inlineHelperConsentSuppressed = value;
+    }
+  }
+
+  setConsentNoticeSuppressed(!findManualConsentControl({ modalOnly: true }));
+
   function report(status, detail, kind = "ok") {
+    document.documentElement.dataset.inlineHelperStatus = status;
+    document.documentElement.dataset.inlineHelperDetail = detail;
     chrome.runtime.sendMessage({ type: "FLOW_STATUS", status, detail, kind }).catch(() => {});
   }
 
@@ -30,6 +67,50 @@
 
   function hideCaptchaNotice() {
     document.querySelector("#inline-helper-captcha-notice")?.remove();
+  }
+
+  function showConsentNotice(control) {
+    if (!control?.closest?.('[role="dialog"], [aria-modal="true"], .house-rules')) {
+      hideConsentNotice();
+      return;
+    }
+    setConsentNoticeSuppressed(false);
+    let host = document.querySelector("#inline-helper-consent-notice");
+    if (host && !host.shadowRoot?.querySelector("button")) {
+      host.remove();
+      host = null;
+    }
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "inline-helper-consent-notice";
+      host.style.cssText = "position:fixed;top:16px;right:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));pointer-events:none;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
+      const root = host.attachShadow({ mode: "open" });
+      root.innerHTML = `
+        <style>*{box-sizing:border-box}.notice{padding:14px 16px;border:2px solid #c56b00;border-radius:14px;background:#fff9e8;box-shadow:0 12px 34px rgba(15,23,42,.2);color:#492c00;font-size:15px;line-height:1.5;pointer-events:auto}.notice strong{display:block;margin-bottom:2px;font-size:17px}button{display:block;width:100%;min-height:42px;margin-top:10px;border:0;border-radius:8px;background:#8a4500;color:#fff;font:inherit;font-weight:700;cursor:pointer}button:disabled{background:#a9a9a9;cursor:not-allowed}</style>
+        <section class="notice" role="group" aria-label="訂位規則確認"><strong>等待你同意規則</strong><span>助手正在把 inline 規則捲到底。請閱讀內容，再按下方按鈕表示同意；付款與最後確認仍由你操作。</span><button type="button" disabled>我已閱讀並同意，代我按 inline 同意</button></section>`;
+      root.querySelector("button").addEventListener("click", () => {
+        const current = findManualConsentControl({ modalOnly: true });
+        const target = interactiveControl(current);
+        if (!target || target.disabled || target.getAttribute?.("aria-disabled") === "true") return;
+        target.click();
+        hideConsentNotice();
+        setTimeout(advance, NAVIGATION_STEP_MS);
+      });
+      document.documentElement.appendChild(host);
+    }
+    const ready = !control.disabled && control.getAttribute?.("aria-disabled") !== "true";
+    const button = host.shadowRoot?.querySelector("button");
+    if (button && button.disabled !== !ready) button.disabled = !ready;
+    const detail = host.shadowRoot?.querySelector("span");
+    const text = ready
+      ? "規則已捲到底。請閱讀內容，再按下方按鈕表示同意；付款與最後確認仍由你操作。"
+      : "助手正在把 inline 規則捲到底。請閱讀內容，再按下方按鈕表示同意；付款與最後確認仍由你操作。";
+    if (detail && detail.textContent !== text) detail.textContent = text;
+  }
+
+  function hideConsentNotice() {
+    setConsentNoticeSuppressed(true);
+    document.querySelector("#inline-helper-consent-notice")?.remove();
   }
 
   function showPreviewComplete() {
@@ -57,16 +138,16 @@
         button:focus-visible{outline:3px solid #f4b740;outline-offset:3px}
         @media (prefers-reduced-motion:no-preference){.card{animation:enter .2s ease-out}@keyframes enter{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}}
       </style>
-      <p class="sr-only" role="status" aria-live="assertive" aria-atomic="true">預演完成，尚未送出訂位。</p>
+      <p class="sr-only" role="status" aria-live="assertive" aria-atomic="true">等待手動確認，尚未送出訂位。</p>
       <section class="card" role="dialog" aria-modal="true" aria-labelledby="inline-helper-preview-title" aria-describedby="inline-helper-preview-description">
         <div class="head">
           <span class="icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <h2 id="inline-helper-preview-title">預演完成</h2>
+          <h2 id="inline-helper-preview-title">等待手動確認</h2>
         </div>
         <div class="body">
           <p class="lead">已找到可用時段，並填妥目前頁面的訂位資料。</p>
           <p class="warning">尚未送出訂位</p>
-          <p class="note" id="inline-helper-preview-description">這是預演結果，不代表訂位成功。插件沒有按下最後的確認訂位按鈕。</p>
+          <p class="note" id="inline-helper-preview-description">這不代表訂位成功。請自行核對資料並決定是否按下最後的確認訂位按鈕。</p>
           <button type="button">我知道了</button>
         </div>
       </section>`;
@@ -100,12 +181,45 @@
   }
 
   function hasInteractivePaymentStep() {
-    const control = document.querySelector([
-      'input[autocomplete^="cc-"]', 'input[name*="card" i]', 'input[id*="card" i]',
+    const controls = [...document.querySelectorAll([
       'input[autocomplete="one-time-code"]', 'input[name*="otp" i]', 'input[id*="otp" i]',
-      'iframe[src*="stripe" i]', 'iframe[src*="payment" i]', 'iframe[src*="tappaysdk.com" i]', 'iframe[src*="3ds" i]'
-    ].join(","));
-    return Boolean(control && visible(control));
+      'iframe[src*="stripe" i]', 'iframe[src*="payment" i]', 'iframe[src*="3ds" i]',
+      'iframe[src*="card" i]', 'iframe[title*="card" i]', 'iframe[title*="信用卡" i]'
+    ].join(","))].some(visible);
+    return Boolean(Object.keys(paymentFields()).length || controls);
+  }
+
+  function fieldHint(input) {
+    const labels = input.labels ? [...input.labels].map((label) => label.textContent).join(" ") : "";
+    let nearby = "";
+    for (let parent = input.parentElement, depth = 0; parent && depth < 3; parent = parent.parentElement, depth += 1) {
+      if (parent.querySelectorAll("input").length !== 1) break;
+      const text = String(parent.textContent || "").trim();
+      if (text && text.length < 120) { nearby = text; break; }
+    }
+    return `${input.id} ${input.name} ${input.placeholder} ${input.getAttribute("aria-label") || ""} type:${input.type} autocomplete:${input.autocomplete || ""} ${labels} ${nearby}`;
+  }
+
+  function paymentFields() {
+    const found = {};
+    for (const input of document.querySelectorAll("input")) {
+      if (!visible(input) || input.disabled || input.readOnly || input.hidden ||
+          input.getAttribute("aria-hidden") === "true" || input.tabIndex === -1 ||
+          /^(hidden|radio|checkbox|submit|button)$/i.test(input.type)) continue;
+      const kind = InlineHelperCommon.paymentFieldKind(fieldHint(input));
+      if (kind && !found[kind]) found[kind] = input;
+    }
+    return found;
+  }
+
+  function contactFields() {
+    const found = {};
+    for (const input of document.querySelectorAll("input")) {
+      if (!visible(input) || input.disabled || input.readOnly) continue;
+      const kind = InlineHelperCommon.contactFieldKind(fieldHint(input));
+      if (kind && !found[kind]) found[kind] = input;
+    }
+    return found;
   }
 
   function exactButton(...labels) {
@@ -127,16 +241,19 @@
   }
 
   function hasBookingContactFields() {
-    return Boolean([...document.querySelectorAll('input[type="tel"], input[type="email"], input[autocomplete="name"], input[autocomplete="family-name"]')].find(visible));
+    return Object.keys(contactFields()).length > 0;
   }
 
   function detectStage() {
+    if (hasCaptcha()) return "captcha";
+    if (hasBookingContactFields() && [...document.querySelectorAll("#name, #phone")].some((input) => visible(input) && !String(input.value || "").trim())) return "contact";
+    if (hasInteractivePaymentStep()) return "verification";
     const contact = hasBookingContactFields();
     const optionalSkip = Boolean(findSafeOptionalSkipButton());
     const finalConfirmation = Boolean(exactButton("確認預訂", "確認訂位", "送出訂位", "完成訂位", "送出預訂"));
     const dateOrTime = Boolean(document.querySelector("#adult-picker, #kid-picker, .time-slot"));
     return InlineHelperCommon.classifyBookingStage({
-      captcha: Boolean(hasCaptcha()),
+      captcha: false,
       payment: hasInteractivePaymentStep(),
       contact,
       optionalSkip,
@@ -168,126 +285,102 @@
     return btoa(unescape(encodeURIComponent(json)));
   }
 
-  function navigateToDate(reservation, date) {
+  async function navigateToDate(reservation, date) {
+    const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+    if (state.timeSelectedAt || state.detailsReached ||
+        /\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname) ||
+        hasBookingContactFields() || hasInteractivePaymentStep() ||
+        timeButtonIsInRange(selectedTimeButton(), reservation.timeStart, reservation.timeEnd)) return;
     const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
     const base = normalized.kind === "url" ? normalized.value : location.href;
     const url = InlineHelperCommon.setUrlQueryParams(base, {
       pre_filled_form: encodePrefill(reservation, date),
       inline_helper: "1"
     });
-    chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` }).then(() => location.replace(url));
+    if (dateNavigationPending) return;
+    dateNavigationPending = true;
+    dateNavigationAt = Date.now();
+    try {
+      await chrome.storage.local.set({ lastSelectedDate: date, flowStatus: `正在檢查 ${date}` });
+      const latestState = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+      if (latestState.timeSelectedAt || latestState.detailsReached || hasBookingContactFields() || hasInteractivePaymentStep()) {
+        dateNavigationPending = false;
+        return;
+      }
+      location.replace(url);
+    } catch (error) {
+      dateNavigationPending = false;
+      throw error;
+    }
   }
 
   function setNativeValue(element, value) {
-    element.focus();
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
     if (setter) setter.call(element, value);
     else element.value = value;
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: String(value) }));
+    element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
-    element.blur();
-  }
-
-  async function fillPaymentCardholder() {
-    const input = document.querySelector('#cardholder-name, input[autocomplete="cc-name"]');
-    if (!input || !visible(input)) return false;
-    const response = await chrome.runtime.sendMessage({ type: "REQUEST_PAYMENT_CARDHOLDER" });
-    if (!response?.ok || !response.value) return false;
-    const expected = String(response.value).trim();
-    if (String(input.value || "").trim() !== expected) {
-      setNativeValue(input, expected);
-      await new Promise((resolve) => setTimeout(resolve, 80));
-    }
-    if (String(input.value || "").trim() !== expected) return false;
-    await chrome.runtime.sendMessage({ type: "PAYMENT_FIELD_FILLED", field: "cardholderName" });
-    return true;
-  }
-
-  function fillInput(selectors, value) {
-    if (!value) return false;
-    for (const selector of selectors) {
-      const input = document.querySelector(selector);
-      if (input && visible(input)) {
-        if (String(input.value || "").trim() === String(value).trim()) return false;
-        setNativeValue(input, value);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function fillByHint(pattern, value) {
-    if (!value) return false;
-    const input = [...document.querySelectorAll("input, textarea")].filter(visible).find((item) => {
-      const label = item.labels ? [...item.labels].map((x) => x.textContent).join(" ") : "";
-      return pattern.test(`${item.name} ${item.id} ${item.placeholder} ${label}`);
-    });
-    if (!input || String(input.value || "").trim() === String(value).trim()) return false;
-    setNativeValue(input, value);
-    return true;
   }
 
   function fillContactName(value) {
     if (!value) return false;
-    const familyInput = document.querySelector('#familyName, input[autocomplete="family-name"]');
-    const givenInput = document.querySelector('#givenName, input[autocomplete="given-name"]');
+    const fields = contactFields();
+    const familyInput = fields.family;
+    const givenInput = fields.given;
     if ((familyInput && visible(familyInput)) || (givenInput && visible(givenInput))) {
       const { familyName, givenName } = InlineHelperCommon.splitContactName(value);
-      const familyChanged = fillInput(['#familyName', 'input[autocomplete="family-name"]'], familyName);
-      const givenChanged = fillInput(['#givenName', 'input[autocomplete="given-name"]'], givenName);
-      return familyChanged || givenChanged;
+      if (familyInput && !String(familyInput.value || "").trim()) return fillField(familyInput, familyName);
+      return fillField(givenInput, givenName);
     }
-    return fillInput(['#name', 'input[autocomplete="name"]'], value) || fillByHint(/訂位人姓名|訂位人|姓名/i, value);
+    return fillField(fields.name, value);
   }
 
-  function contactValuesMatch(reservation) {
-    const familyInput = document.querySelector('#familyName, input[autocomplete="family-name"]');
-    const givenInput = document.querySelector('#givenName, input[autocomplete="given-name"]');
-    let nameMatches = true;
-    if ((familyInput && visible(familyInput)) || (givenInput && visible(givenInput))) {
-      const split = InlineHelperCommon.splitContactName(reservation.contactName);
-      nameMatches = (!familyInput || String(familyInput.value || "").trim() === split.familyName) &&
-        (!givenInput || String(givenInput.value || "").trim() === split.givenName);
-    } else {
-      const nameInput = document.querySelector('#name, input[autocomplete="name"]');
-      if (nameInput && visible(nameInput)) nameMatches = String(nameInput.value || "").trim() === String(reservation.contactName || "").trim();
-    }
-    const phoneInput = [...document.querySelectorAll('#phone, input[type="tel"]')].find(visible);
-    const emailInput = [...document.querySelectorAll('#email, input[type="email"]')].find(visible);
-    const phoneMatches = !phoneInput || String(phoneInput.value || "").replace(/\D/g, "") === String(reservation.contactPhone || "").replace(/\D/g, "");
-    const emailMatches = !emailInput || !reservation.contactEmail || String(emailInput.value || "").trim().toLowerCase() === String(reservation.contactEmail).trim().toLowerCase();
-    return nameMatches && phoneMatches && emailMatches;
+  function fillField(input, value) {
+    if (!input || !value || String(input.value || "").trim()) return false;
+    setNativeValue(input, value);
+    return String(input.value || "").trim() === String(value).trim();
   }
 
-  function fillNextContactField(reservation) {
-    if (fillContactName(reservation.contactName)) return "姓名";
-    if (fillInput(['#phone', 'input[type="tel"]'], reservation.contactPhone) || fillByHint(/手機|電話|phone|mobile|tel/i, reservation.contactPhone)) return "手機";
-    if (fillInput(['#email', 'input[type="email"]'], reservation.contactEmail) || fillByHint(/email|e-mail|電子信箱|信箱/i, reservation.contactEmail)) return "Email";
-    return "";
-  }
-
-  function findTimeButtons() {
-    return [...document.querySelectorAll("button")].filter((button) => {
-      if (!visible(button) || button.disabled || button.getAttribute("aria-disabled") === "true") return false;
-      if (button.classList.contains("full") || /額滿|已滿|候補|無空位/i.test(button.textContent || "")) return false;
+  function findTimeButtons({ includeUnavailable = false } = {}) {
+    const buttons = [...document.querySelectorAll("button")];
+    const slots = buttons.filter((button) => button.classList.contains("time-slot"));
+    return (slots.length ? slots : buttons).filter((button) => {
+      if (!visible(button)) return false;
+      if (!includeUnavailable && (button.disabled || button.getAttribute("aria-disabled") === "true" ||
+          button.classList.contains("full") || /額滿|已滿|候補|無空位/i.test(button.textContent || ""))) return false;
       return InlineHelperCommon.timeToMinutes(button.textContent) !== null;
     });
   }
 
-  function findTimeButtonInRange(start, end) {
+  function findTimeButtonInRange(start, end, rejected = []) {
     const min = InlineHelperCommon.timeToMinutes(start);
     const max = InlineHelperCommon.timeToMinutes(end);
     return findTimeButtons()
       .map((button) => ({ button, value: InlineHelperCommon.timeToMinutes(button.textContent) }))
-      .filter((item) => item.value >= min && item.value <= max)
+      .filter((item) => item.value >= min && item.value <= max && !rejected.includes(item.value))
       .sort((a, b) => a.value - b.value)[0]?.button || null;
   }
 
   function selectedTimeButton() {
-    return findTimeButtons().find((button) =>
+    const selected = findTimeButtons().find((button) =>
       button.classList.contains("selected") || button.getAttribute("aria-pressed") === "true" ||
       /已選擇|selected/i.test(button.getAttribute("aria-label") || "")
     );
+    if (selected) return selected;
+    // Some inline pages show selection only in the bottom booking summary.
+    if (!findBookingDetailsButton({ allowSelectionContinue: true })) return null;
+    return [...document.querySelectorAll("button")].find((button) => visible(button) &&
+      !button.classList.contains("time-slot") && /^\s*(?:時段\s*)?\d{1,2}[:：]\d{2}\s*$/.test(button.textContent || "")) || null;
+  }
+
+  function findBookingDetailsButton({ allowSelectionContinue = false } = {}) {
+    const selectionPage = allowSelectionContinue && document.querySelector("#adult-picker") &&
+      !/\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname) &&
+      !hasBookingContactFields() && !hasInteractivePaymentStep();
+    return [...document.querySelectorAll("button")].find((button) => visible(button) &&
+      !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+      (/^(?:下一步(?:[，,:：\s]*填寫(?:訂位)?資料)?|填寫(?:訂位)?(?:資料|聯絡資訊))$/.test(buttonText(button)) ||
+       (selectionPage && buttonText(button) === "完成預訂")));
   }
 
   function timeButtonIsInRange(button, start, end) {
@@ -383,41 +476,28 @@
 
   function chooseDiningPurpose(reservation) {
     const wanted = String(reservation.diningPurpose || "朋友聚餐").trim();
-    const purposeChoices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((item) => {
+    const labels = wanted === "朋友聚餐" ? [wanted, "一般聚餐"] : [wanted];
+    const choices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((choice) =>
+      visible(choice) && labels.includes((choice.textContent || "").trim())
+    );
+    const choice = choices.find((item) => {
       let parent = item.parentElement;
       for (let depth = 0; depth < 4 && parent; depth += 1, parent = parent.parentElement) {
         if (/用餐目的/.test(parent.innerText || "")) return true;
       }
       return false;
-    });
-    if (!purposeChoices.length || purposeChoices.some(controlIsSelected)) return false;
-    const aliases = wanted === "朋友聚餐" ? ["朋友聚餐", "一般聚餐", "親友聚餐", "同住親友聚餐"] : [wanted];
-    const choiceText = (item) => String(item.textContent || item.getAttribute("aria-label") ||
-      (item.labels ? [...item.labels].map((label) => label.textContent).join(" ") : "")).trim();
-    const choice = aliases.map((label) => purposeChoices.find((item) => choiceText(item) === label)).find(Boolean);
+    }) || choices[0];
     if (!choice || controlIsSelected(choice)) return false;
     choice.click();
-    report("填目的", `已選擇用餐目的：${choiceText(choice) || wanted}`);
+    report("填目的", `已選擇用餐目的：${(choice.textContent || "").trim()}`);
     return true;
-  }
-
-  function diningPurposeNeedsAttention() {
-    const choices = [...document.querySelectorAll('[role="checkbox"], [role="radio"]')].filter((item) => {
-      let parent = item.parentElement;
-      for (let depth = 0; depth < 4 && parent; depth += 1, parent = parent.parentElement) {
-        if (/用餐目的/.test(parent.innerText || "")) return true;
-      }
-      return false;
-    });
-    if (!choices.length || choices.some(controlIsSelected)) return null;
-    return { element: choices[0].parentElement || choices[0], label: "用餐目的" };
   }
 
   function findManualConsentControl({ modalOnly = false } = {}) {
     return [...document.querySelectorAll('button, [role="button"], [role="checkbox"], label')].find((element) =>
       visible(element) && InlineHelperCommon.isAutoConsentText(element.textContent) &&
       consentControlIsActionable(element) &&
-      (!modalOnly || Boolean(element.closest('[role="dialog"], [aria-modal="true"]')))
+      (!modalOnly || Boolean(element.closest('[role="dialog"], [aria-modal="true"], .house-rules')))
     ) || null;
   }
 
@@ -449,26 +529,30 @@
     });
   }
 
-  function acceptManualConsent(control) {
+  function waitForManualConsent(control) {
     if (!control) return false;
     const target = interactiveControl(control);
     if (controlIsSelected(target)) return false;
-    const disabled = target.disabled || target.getAttribute("aria-disabled") === "true";
-    if (disabled) {
-      const scope = target.closest('[role="dialog"], [aria-modal="true"]') || document;
-      const scrollable = [scope, ...scope.querySelectorAll("div, section, main")].find((element) =>
-        element.scrollHeight > element.clientHeight + 8
-      );
-      if (scrollable) {
-        scrollable.scrollTop = scrollable.scrollHeight;
-        scrollable.dispatchEvent(new Event("scroll", { bubbles: true }));
-      }
-      report("閱讀條款", "正在捲到規則與注意事項底部，完成後會自動同意");
-      setTimeout(advance, NAVIGATION_STEP_MS);
+    const modal = control.closest?.('[role="dialog"], [aria-modal="true"], .house-rules');
+    if (!modal) {
+      hideConsentNotice();
+      report("待手動確認", "聯絡資料已填妥；請在 inline 核對預付訂金與取消退款須知，再完成付款與最後確認", "error");
       return true;
     }
-    target.click();
-    report("已同意條款", "已按下規則與注意事項的同意按鈕；尚未填寫或授權信用卡");
+    if (target.disabled || target.getAttribute?.("aria-disabled") === "true") {
+      const scrollArea = modal && [modal, ...(modal.querySelectorAll?.("*") || [])].find((element) =>
+        element.clientHeight > 0 && element.scrollHeight > element.clientHeight + 2 &&
+        element.scrollTop < element.scrollHeight - element.clientHeight - 2
+      );
+      if (scrollArea) {
+        const before = scrollArea.scrollTop;
+        scrollArea.scrollTop = Math.min(scrollArea.scrollHeight - scrollArea.clientHeight,
+          before + Math.max(100, Math.floor(scrollArea.clientHeight * 0.9)));
+        if (scrollArea.scrollTop > before) setTimeout(advance, FAST_STEP_MS);
+      }
+    }
+    showConsentNotice(target);
+    report("待手動同意", "助手會將規則捲到底；請閱讀後在頁面右上角明確同意，完成後助手會繼續填寫資料", "error");
     return true;
   }
 
@@ -499,28 +583,49 @@
     missing.element.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  function isSuccessPage() {
-    return /\/(success|complete|confirmation)(\/|$)/i.test(location.pathname) || /訂位成功|預約成功|已完成訂位/.test(pageText());
-  }
-
   async function advance() {
-    if (busy) return;
+    if (document.documentElement.dataset.inlineHelperVersion !== CONTENT_VERSION) {
+      observer.disconnect();
+      return;
+    }
+    if (busy) {
+      pendingAdvance = true;
+      return;
+    }
     busy = true;
+    let watchForProgress = false;
     try {
-      const scope = await chrome.runtime.sendMessage({ type: "CHECK_FLOW_SCOPE" });
+      if (!findManualConsentControl({ modalOnly: true })) hideConsentNotice();
+      const stage = detectStage();
+      const scope = await chrome.runtime.sendMessage({ type: "CHECK_FLOW_SCOPE", stage });
       if (!scope?.active) return;
+      publishStage(stage);
       const { reservation } = await chrome.storage.local.get("reservation");
       if (!reservation?.enabled) return;
-      const helperUrl = new URLSearchParams(location.search).has("inline_helper");
-      const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
-      publishStage(detectStage());
-
-      if (isSuccessPage()) {
-        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowLeaseUntil: 0, flowStatus: "訂位完成" });
-        await chrome.runtime.sendMessage({ type: "CLEAR_PAYMENT_AUTOFILL" });
-        report("完成", "inline 已顯示訂位成功");
+      watchForProgress = true;
+      if (dateNavigationPending) {
+        if (Date.now() - dateNavigationAt >= 5000) {
+          watchForProgress = false;
+          dateNavigationPending = false;
+          await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+          report("日期載入失敗", "已要求切換日期，但 inline 在 5 秒內未載入新頁面；請確認網路與頁面錯誤，再從外掛繼續。", "error");
+        }
         return;
       }
+      const helperUrl = new URLSearchParams(location.search).has("inline_helper");
+      const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+      const flowPath = /\/(?:form|payment|checkout|confirm|confirmation)\/?$/i.test(location.pathname);
+      const detailsVisible = flowPath || hasBookingContactFields() || hasInteractivePaymentStep();
+      if (detailsVisible && !state.detailsReached) {
+        state.detailsReached = true;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
+      if (state.detailsReached && !detailsVisible) {
+        watchForProgress = false;
+        report("流程中斷", "已進入資料頁，現在卻回到選位頁；助手已停止重新找日期，請檢查目前頁面", "error");
+        return;
+      }
+
       if (hasCaptcha()) {
         showCaptchaNotice();
         report("CAPTCHA", "等待你手動完成人類驗證；完成後助手會繼續", "error");
@@ -528,13 +633,14 @@
       }
       hideCaptchaNotice();
       const modalConsentControl = findManualConsentControl({ modalOnly: true });
-      if (acceptManualConsent(modalConsentControl)) return;
-      if (!helperUrl && !/\/form\/?$/.test(location.pathname)) {
-        navigateToDate(reservation, reservation.dateStart);
+      if (waitForManualConsent(modalConsentControl)) return;
+      hideConsentNotice();
+      if (!helperUrl && !detailsVisible && !state.timeSelectedAt) {
+        await navigateToDate(reservation, reservation.dateStart);
         return;
       }
 
-      const adultPicker = document.querySelector("#adult-picker");
+      const adultPicker = detailsVisible ? null : document.querySelector("#adult-picker");
       if (adultPicker) {
         const option = [...adultPicker.options].find((item) => (item.textContent || "").includes(`${reservation.adults}位大人`));
         if (option && String(adultPicker.value) !== String(option.value)) {
@@ -554,6 +660,7 @@
       }
 
       const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
+      document.documentElement.dataset.inlineHelperTargetDate = lastSelectedDate || reservation.dateStart;
       const shownDate = pageSelectedDate();
       if (adultPicker && shownDate && lastSelectedDate && shownDate.value !== lastSelectedDate) {
         const dateResult = selectTargetCalendarDate(lastSelectedDate, shownDate.element);
@@ -577,22 +684,63 @@
       if (adultPicker && selectBookingOption()) return;
       const selectedTime = selectedTimeButton();
       const selectedTimeIsValid = timeButtonIsInRange(selectedTime, reservation.timeStart, reservation.timeEnd);
-      if (adultPicker && !selectedTimeIsValid) {
-        const timeButton = findTimeButtonInRange(reservation.timeStart, reservation.timeEnd);
+      if (adultPicker && selectedTimeIsValid && (!state.timeSelectedAt || state.selectionVerifiedVersion !== CONTENT_VERSION)) {
+        state.timeSelectedAt ||= Date.now();
+        state.selectedMinutes = InlineHelperCommon.timeToMinutes(selectedTime.textContent);
+        state.selectionVerifiedVersion = CONTENT_VERSION;
+        delete state.pendingTimeSelection;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
+      if (adultPicker && !selectedTimeIsValid && state.timeSelectedAt &&
+          (!state.bookingButtonClickedAt || state.selectionVerifiedVersion !== CONTENT_VERSION ||
+           (findTimeButtons({ includeUnavailable: true }).length &&
+            !findBookingDetailsButton({ allowSelectionContinue: true })))) {
+        // Older versions recorded a click before inline accepted the selection.
+        delete state.timeSelectedAt;
+        delete state.bookingButtonClickedAt;
+        delete state.bookingButtonAttempts;
+        delete state.selectionVerifiedVersion;
+        delete state.selectedMinutes;
+        delete state.pendingTimeSelection;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+        report("時段已失效", "inline 已撤回時段選取，正在重新檢查可用時段與日期");
+      }
+      if (adultPicker && !selectedTimeIsValid && !state.timeSelectedAt) {
+        const scanDate = lastSelectedDate || reservation.dateStart;
+        const rejected = state.rejectedTimes?.[scanDate] || [];
+        const pending = state.pendingTimeSelection;
+        if (pending && pending.date === scanDate) {
+          if (Date.now() - pending.clickedAt < 1500) {
+            report("確認時段", "已按時段，正在確認 inline 是否接受選取");
+            return;
+          }
+          if (pending.attempts >= 3) {
+            state.rejectedTimes ||= {};
+            state.rejectedTimes[scanDate] = [...new Set([...rejected, pending.minutes])];
+            delete state.pendingTimeSelection;
+            sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+            report("時段未接受", "inline 未接受這個時段，正在檢查其他可用時段");
+            return;
+          }
+        }
+        const timeButton = findTimeButtonInRange(reservation.timeStart, reservation.timeEnd, rejected);
         if (timeButton) {
+          const minutes = InlineHelperCommon.timeToMinutes(timeButton.textContent);
+          state.pendingTimeSelection = { date: scanDate, minutes, clickedAt: Date.now(),
+            attempts: pending?.date === scanDate && pending.minutes === minutes ? pending.attempts + 1 : 1 };
+          sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
           report("選時段", `正在選擇 ${(timeButton.textContent || "").trim()}`);
           timeButton.click();
           return;
         }
-        if (findTimeButtons().length || document.querySelector(".time-slot")) {
+        const loading = [...document.querySelectorAll('[aria-busy="true"], [role="progressbar"]')].some(visible);
+        const noAvailability = /(?:當日|本日|當天|此日期|所選日期).{0,20}(?:無|沒有|已無).{0,10}(?:空位|時段)|沒有可預訂的時段|無可用時段/.test(pageText());
+        if (!loading && (findTimeButtons({ includeUnavailable: true }).length || noAvailability)) {
           const current = lastSelectedDate || reservation.dateStart;
           const following = nextDate(current);
-          const scanCount = Number(state.scanCount || 0) + 1;
-          state.scanCount = scanCount;
-          sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-          if (following <= reservation.dateEnd && scanCount < 14) {
+          if (following <= reservation.dateEnd) {
             report("下一天", `${current} 沒有區間內時段，接著檢查 ${following}`);
-            setTimeout(() => navigateToDate(reservation, following), NAVIGATION_STEP_MS);
+            await navigateToDate(reservation, following);
           } else {
             await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
             report("沒有空位", `${reservation.dateStart} 至 ${reservation.dateEnd} 沒有找到 ${reservation.timeStart}–${reservation.timeEnd}`, "error");
@@ -618,65 +766,67 @@
           return;
         }
       }
-      if (adultPicker && selectedTimeIsValid) {
-        const bookingButton = exactButton("完成預訂", "填寫訂位資料", "下一步");
-        if (bookingButton) {
+      if (adultPicker && (selectedTimeIsValid || state.timeSelectedAt)) {
+        const bookingButton = findBookingDetailsButton({ allowSelectionContinue: true });
+        if (bookingButton && !bookingButton.disabled &&
+            (!state.bookingButtonClickedAt || (selectedTimeIsValid &&
+              Date.now() - state.bookingButtonClickedAt >= 1500 &&
+              Number(state.bookingButtonAttempts || 1) < 3))) {
+          state.bookingButtonAttempts = Number(state.bookingButtonAttempts || (state.bookingButtonClickedAt ? 1 : 0)) + 1;
+          state.timeSelectedAt ||= Date.now();
+          state.bookingButtonClickedAt = Date.now();
+          sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
           report("下一步", "正在進入訂位資料頁");
           bookingButton.click();
           return;
         }
       }
 
-      const changedContact = fillNextContactField(reservation);
-      if (changedContact) {
-        report("填寫資料", `正在填寫並確認${changedContact}`);
-        setTimeout(advance, NAVIGATION_STEP_MS);
+      if (state.timeSelectedAt && !detailsVisible) {
+        if (Date.now() - state.timeSelectedAt >= 15000) {
+          watchForProgress = false;
+          await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+          report("資料頁未開啟", "inline 在選時段後 15 秒仍未開啟資料頁；請檢查時段是否已選取、下一步是否可按，或頁面是否有錯誤提示，再從外掛繼續。", "error");
+          return;
+        }
+        report("等待資料頁", "已選擇符合條件的時段，正在等待 inline 開啟資料頁；不會重新找日期");
         return;
       }
-      if (hasBookingContactFields() && !contactValuesMatch(reservation)) {
-        report("資料未寫入", "Inline 清除了聯絡資料，助手會停止以避免空白送出", "error");
+
+      const contact = contactFields();
+      for (const [input, value, label] of [
+        [contact.phone, reservation.contactPhone, "手機"],
+        [contact.email, reservation.contactEmail, "Email"]
+      ]) {
+        if (!input || !value || String(input.value || "").trim()) continue;
+        const filled = fillField(input, value);
+        report(filled ? "已填寫" : "填寫失敗", filled ? `已填入${label}` : `${label}欄位未接受填入，請手動完成`, filled ? "ok" : "error");
+        if (filled) setTimeout(advance, FAST_STEP_MS);
+        return;
+      }
+      const nameMissing = Boolean(reservation.contactName && (
+        (contact.family && !String(contact.family.value || "").trim()) ||
+        (contact.given && !String(contact.given.value || "").trim()) ||
+        (contact.name && !String(contact.name.value || "").trim())
+      ));
+      if (nameMissing) {
+        const filled = fillContactName(reservation.contactName);
+        report(filled ? "已填寫" : "填寫失敗", filled ? "已填入訂位姓名" : "姓名欄位未接受填入，請手動完成", filled ? "ok" : "error");
+        if (filled) setTimeout(advance, FAST_STEP_MS);
         return;
       }
       if (chooseDiningPurpose(reservation)) return;
-      const missingPurpose = diningPurposeNeedsAttention();
-      if (missingPurpose) {
-        markNeedsAttention(missingPurpose);
-        report("缺必填", "找不到可安全對應的用餐目的，請手動選擇", "error");
-        return;
-      }
-      if (hasBookingContactFields()) report("已填寫", "姓名、手機與 Email 已逐欄確認寫入");
 
-      const manualConsentControl = findManualConsentControl();
-      if (manualConsentControl && state.authorizationStepAttemptedAt) {
-        delete state.authorizationStepAttemptedAt;
-        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-      }
-      if (acceptManualConsent(manualConsentControl)) return;
+      hideConsentNotice();
 
       if (hasInteractivePaymentStep()) {
-        const payment = await chrome.runtime.sendMessage({ type: "PAYMENT_AUTOFILL_STATUS" });
-        if (payment?.active) {
-          await fillPaymentCardholder();
-          report("代填信用卡", "正在逐欄填入本次暫存的信用卡資料；填入後即刪除暫存值");
-          setTimeout(advance, 180);
-          return;
-        }
-        if (!payment?.completed) {
-          report("需填信用卡", "未提供本次信用卡代填資料；請手動填寫，OTP 或付款驗證仍由你完成", "error");
-          return;
-        }
-        if (!reservation.autoSubmit) {
-          await chrome.storage.local.set({
-            reservation: { ...reservation, enabled: false },
-            flowLeaseUntil: 0,
-            previewCompletedAt: Date.now()
-          });
-          showPreviewComplete();
-          report("預演完成", "信用卡資料已代填；預演模式沒有按下信用卡授權或送出訂位");
-          return;
-        }
-        report("信用卡已填", "信用卡資料已代填並從暫存刪除；正在繼續，OTP 仍需手動");
+        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+        report("待手動付款", "聯絡資料已填妥；請在 inline 頁面自行填寫信用卡並確認付款。", "ok");
+        return;
       }
+
+      const manualConsentControl = findManualConsentControl();
+      if (waitForManualConsent(manualConsentControl)) return;
 
       const missing = unansweredRequired();
       if (missing) {
@@ -691,60 +841,105 @@
 
       const paymentAuthorizationButton = findPaymentAuthorizationButton();
       if (paymentAuthorizationButton) {
-        if (state.authorizationStepAttemptedAt) {
-          report("進入確認頁", "已按過前往確認頁，正在等待 inline 顯示最終確認資料");
-          return;
-        }
-        state.authorizationStepAttemptedAt = Date.now();
-        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-        report("進入確認頁", "條款與金額已處理，正在開啟最終確認資料頁");
-        paymentAuthorizationButton.click();
+        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+        report("待手動授權", "已停在付款／信用卡授權按鈕前；請自行核對金額並操作，外掛不會按付款", "error");
         return;
       }
 
       const finalButton = exactButton("確認預訂", "確認訂位", "送出訂位", "完成訂位", "送出預訂");
-      const finalAction = InlineHelperCommon.finalSubmitAction({
-        autoSubmit: reservation.autoSubmit,
-        submitAttemptedAt: state.submitAttemptedAt,
-        hasFinalButton: Boolean(finalButton)
-      });
-      if (finalAction === "processing") {
-        report("預演處理中", "資料已填妥，正在等待 inline 顯示最終確認步驟");
-        return;
-      }
-      if (finalAction === "preview") {
+      if (finalButton) {
         await chrome.storage.local.set({
           reservation: { ...reservation, enabled: false },
-          flowLeaseUntil: 0,
           previewCompletedAt: Date.now()
         });
         showPreviewComplete();
-        report("預演完成", "預演完成：已找到可用時段並填妥資料；沒有送出訂位");
+        report("待手動確認", "資料已填妥；外掛已停止，請自行核對並按最後確認訂位", "ok");
         return;
       }
-      if (finalAction === "wait") {
-        report("請確認", "已送出一次，但尚未看到成功頁；為避免重複訂位，請查看頁面訊息", "error");
-        return;
-      }
-      if (finalAction === "submit") {
-        state.submitAttemptedAt = Date.now();
-        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
-        report("送出中", "正在送出最終訂位");
-        finalButton.click();
-      }
+      report("等待頁面", "資料已填妥，等待 inline 顯示下一步；外掛不會自動付款或送出訂位");
     } catch (error) {
+      watchForProgress = false;
       report("發生錯誤", `訂位頁處理失敗：${error?.message || "頁面流程無法繼續"}`, "error");
     } finally {
       busy = false;
+      if (pendingAdvance) {
+        pendingAdvance = false;
+        scheduleAdvance();
+      } else if (watchForProgress) {
+        scheduleAdvance(250);
+      }
     }
   }
 
-  const observer = new MutationObserver(() => {
-    clearTimeout(observer.timer);
-    observer.timer = setTimeout(advance, FAST_STEP_MS);
+  function isHelperMutation(record) {
+    const ownedNode = (node) => Boolean(node?.id?.startsWith("inline-helper-") ||
+      node?.parentElement?.closest?.('[id^="inline-helper-"]'));
+    if (record.type === "attributes" && record.target === document.documentElement &&
+      record.attributeName?.startsWith("data-inline-helper-")) return true;
+    if (ownedNode(record.target)) return true;
+    const nodes = [...(record.addedNodes || []), ...(record.removedNodes || [])];
+    return nodes.length > 0 && nodes.every(ownedNode);
+  }
+
+  const observer = new MutationObserver((records = []) => {
+    if (records.length && records.every(isHelperMutation)) return;
+    scheduleAdvance();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  document.addEventListener?.("visibilitychange", () => {
+    if (document.visibilityState === "visible") scheduleAdvance();
+  });
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (document.documentElement.dataset.inlineHelperVersion !== CONTENT_VERSION) return false;
+    if (message.type === "ADVANCE_FLOW") {
+      advance();
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.type === "FILL_CONTACT_DETAILS") {
+      (async () => {
+        const scope = await chrome.runtime.sendMessage({ type: "CHECK_FLOW_SCOPE", stage: "contact" });
+        const { reservation } = await chrome.storage.local.get("reservation");
+        if (!scope?.active || !reservation || !hasBookingContactFields()) {
+          return { ok: false, error: "目前不是這次任務的訂位資料頁，請切回原訂位分頁。" };
+        }
+        const fields = contactFields();
+        if (fields.phone && reservation.contactPhone) fillField(fields.phone, reservation.contactPhone);
+        if (fields.email && reservation.contactEmail) fillField(fields.email, reservation.contactEmail);
+        if (reservation.contactName) fillContactName(reservation.contactName);
+        chooseDiningPurpose(reservation);
+        const nameAccepted = Boolean(String(fields.name?.value || fields.family?.value || "").trim());
+        const phoneAccepted = Boolean(String(fields.phone?.value || "").trim());
+        if (!nameAccepted || !phoneAccepted) {
+          report("補填失敗", "姓名或手機欄位未接受填入，請在 inline 頁面手動完成", "error");
+          return { ok: false, error: "姓名或手機欄位未接受填入，請在 inline 頁面手動完成。" };
+        }
+        publishStage(detectStage());
+        report("待手動付款", "聯絡資料已填入；信用卡位於金流 iframe，請在 inline 頁面手動填寫並確認");
+        return { ok: true };
+      })().then(sendResponse).catch(() => sendResponse({ ok: false, error: "聯絡資料填入失敗，請在 inline 頁面手動完成。" }));
+      return true;
+    }
+    return false;
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (document.documentElement.dataset.inlineHelperVersion !== CONTENT_VERSION) {
+      observer.disconnect();
+      return;
+    }
+    if (areaName === "local" && changes.reservation?.newValue?.enabled &&
+        !changes.reservation?.oldValue?.enabled) {
+      dateNavigationPending = false;
+      const state = JSON.parse(sessionStorage.getItem(HELPER_KEY) || "{}");
+      if (state.timeSelectedAt && !state.detailsReached) {
+        state.timeSelectedAt = Date.now();
+        delete state.bookingButtonClickedAt;
+        delete state.bookingButtonAttempts;
+        delete state.pendingTimeSelection;
+        delete state.rejectedTimes;
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+      }
+    }
     if (areaName === "local" && (changes.activeReservationTabId || changes.reservation)) advance();
   });
   advance();

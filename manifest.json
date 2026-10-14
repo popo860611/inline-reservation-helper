@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "inline 訂位快手",
-  "version": "0.3.31",
+  "version": "0.3.50",
   "description": "依餐廳、日期區間、時間區間與人數，自動尋找 inline 可用訂位。",
   "permissions": ["alarms", "storage", "scripting"],
   "host_permissions": [
     "https://api.github.com/*",
     "https://diner-network-api.inline.app/*",
-    "https://inline.app/*",
-    "https://js.tappaysdk.com/*"
+    "https://inline.app/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -24,12 +23,6 @@
     {
       "matches": ["https://dining.inline.app/*"],
       "js": ["common.js", "search.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["https://js.tappaysdk.com/sdk/tpdirect/tappay-field/html/*"],
-      "js": ["payment-frame.js"],
-      "all_frames": true,
       "run_at": "document_idle"
     }
   ],

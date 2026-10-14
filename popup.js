@@ -24,15 +24,9 @@ const pageRuntimeVersion = document.querySelector("#page-runtime-version");
 const saveSettingsButton = document.querySelector("#save-settings");
 const saveSettingsStatus = document.querySelector("#save-settings-status");
 const reloadExtensionButton = document.querySelector("#reload-extension");
-const liveMode = document.querySelector("#live-mode");
-const modeToggle = document.querySelector("#mode-toggle");
-const paymentAutofill = document.querySelector("#payment-autofill");
-const paymentFields = document.querySelector("#payment-fields");
-const cardholderName = document.querySelector("#cardholder-name");
-const cardNumber = document.querySelector("#card-number");
-const cardExpiry = document.querySelector("#card-expiry");
-const cardSecurityCode = document.querySelector("#card-security-code");
-const BUILD_VERSION = "0.3.31";
+const BUILD_VERSION = "0.3.50";
+const contactRecoverySection = document.querySelector("#contact-recovery-section");
+const resumeSection = document.querySelector("#resume-section");
 let pendingUpdateAction = null;
 let manualCheckReadyAt = 0;
 
@@ -61,12 +55,6 @@ function renderInitialUpdateStatus() {
   updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未手動檢查`;
 }
 
-function renderRunMode() {
-  modeToggle.textContent = liveMode.checked ? "實際｜自動確認" : "預演｜不送出";
-  modeToggle.classList.toggle("live", liveMode.checked);
-  modeToggle.setAttribute("aria-pressed", String(liveMode.checked));
-}
-
 function renderSettingsStatus(message, kind = "") {
   saveSettingsStatus.textContent = message;
   saveSettingsStatus.className = kind;
@@ -79,8 +67,16 @@ async function checkBackgroundVersion() {
     if (response?.ok && response.version) backgroundVersion = response.version;
   } catch (_error) {}
 
-  const { loadedPageHelperVersion, loadedPageHelperStage } = await chrome.storage.local.get(["loadedPageHelperVersion", "loadedPageHelperStage"]);
-  const stageNames = { availability: "選位", optional: "額外選購", contact: "訂位資料", payment: "付款", confirmation: "最後確認", captcha: "真人驗證", unknown: "辨識中" };
+  const { loadedPageHelperVersion, loadedPageHelperStage, reservation, lastOpenedUrl } = await chrome.storage.local.get([
+    "loadedPageHelperVersion", "loadedPageHelperStage", "reservation", "lastOpenedUrl"
+  ]);
+  const stageNames = { availability: "選位", optional: "額外選購", contact: "訂位資料", payment: "付款", verification: "手動付款驗證", manual_payment: "待手動確認付款", confirmation: "最後確認", captcha: "真人驗證", unknown: "辨識中" };
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const expectedIdentity = InlineHelperCommon.bookingIdentity(lastOpenedUrl || reservation?.restaurantQuery);
+  resumeSection.hidden = !(reservation && expectedIdentity);
+  contactRecoverySection.hidden = !(reservation && expectedIdentity &&
+    InlineHelperCommon.bookingIdentity(activeTab?.url) === expectedIdentity &&
+    /\/form\/?(?:[?#]|$)/i.test(activeTab?.url || ""));
   const stageDetail = loadedPageHelperStage ? `｜${stageNames[loadedPageHelperStage] || loadedPageHelperStage}` : "";
   pageRuntimeVersion.textContent = loadedPageHelperVersion
     ? `頁面助手 v${loadedPageHelperVersion}${loadedPageHelperVersion === BUILD_VERSION ? "｜已套用" : "｜請重新載入 inline 頁面"}${stageDetail}`
@@ -166,50 +162,12 @@ reloadExtensionButton.addEventListener("click", async () => {
   chrome.runtime.reload();
 });
 
-modeToggle.addEventListener("click", async () => {
-  liveMode.checked = !liveMode.checked;
-  renderRunMode();
-  const { reservation } = await chrome.storage.local.get("reservation");
-  const updates = { selectedRunMode: liveMode.checked ? "live" : "preview" };
-  if (reservation) updates.reservation = { ...reservation, autoSubmit: liveMode.checked };
-  await chrome.storage.local.set(updates);
-  renderSettingsStatus("模式設定已儲存", "saved");
-  setStatus(
-    liveMode.checked
-      ? "已切換為實際模式；條款與金額會自動確認，只有需要填卡、OTP 或 CAPTCHA 時才會停止。"
-      : "已切換為預演模式；只找位與填寫，不會送出最終訂位。",
-    liveMode.checked ? "error" : "ok"
-  );
-});
-
-document.querySelector("#reservation-form").addEventListener("input", (event) => {
-  if (event.target.closest(".payment-details")) return;
+document.querySelector("#reservation-form").addEventListener("input", () => {
   renderSettingsStatus("有尚未儲存的變更", "dirty");
 });
 
-document.querySelector("#reservation-form").addEventListener("change", (event) => {
-  if (event.target.closest(".payment-details")) return;
+document.querySelector("#reservation-form").addEventListener("change", () => {
   renderSettingsStatus("有尚未儲存的變更", "dirty");
-});
-
-paymentAutofill.addEventListener("change", () => {
-  paymentFields.hidden = !paymentAutofill.checked;
-  if (paymentAutofill.checked && !cardholderName.value.trim()) cardholderName.value = fields.contactName.value.trim();
-  if (!paymentAutofill.checked) clearPaymentInputs();
-});
-
-cardNumber.addEventListener("input", () => {
-  const digits = cardNumber.value.replace(/\D/g, "").slice(0, 19);
-  cardNumber.value = digits.replace(/(.{4})/g, "$1 ").trim();
-});
-
-cardExpiry.addEventListener("input", () => {
-  const digits = cardExpiry.value.replace(/\D/g, "").slice(0, 4);
-  cardExpiry.value = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
-});
-
-cardSecurityCode.addEventListener("input", () => {
-  cardSecurityCode.value = cardSecurityCode.value.replace(/\D/g, "").slice(0, 4);
 });
 
 window.addEventListener("pageshow", renderInitialUpdateStatus);
@@ -228,7 +186,7 @@ function readReservation() {
   const value = Object.fromEntries(Object.entries(fields).map(([key, element]) => [
     key, element.type === "checkbox" ? element.checked : element.value.trim()
   ]));
-  value.autoSubmit = liveMode.checked;
+  value.autoSubmit = false;
   return {
     ...value,
     adults: Number(value.adults),
@@ -237,40 +195,6 @@ function readReservation() {
     language: "zh",
     enabled: true
   };
-}
-
-function clearPaymentInputs() {
-  cardholderName.value = "";
-  cardNumber.value = "";
-  cardExpiry.value = "";
-  cardSecurityCode.value = "";
-}
-
-function readPaymentAutofill(reservation, scheduling = false) {
-  if (!paymentAutofill.checked) return null;
-  const number = cardNumber.value.replace(/\D/g, "");
-  const expiry = cardExpiry.value.replace(/\D/g, "");
-  const securityCode = cardSecurityCode.value.replace(/\D/g, "");
-  const holder = cardholderName.value.trim() || reservation.contactName;
-  if (!/^\d{13,19}$/.test(number)) throw new Error("信用卡號需為 13 到 19 位數字。");
-  if (!/^(0[1-9]|1[0-2])\d{2}$/.test(expiry)) throw new Error("到期日請使用 MM/YY 格式。");
-  if (!/^\d{3,4}$/.test(securityCode)) throw new Error("安全碼需為 3 或 4 位數字。");
-  const releaseTime = scheduling && reservation.releaseAt ? new Date(reservation.releaseAt).getTime() : Date.now();
-  return {
-    cardholderName: holder,
-    cardNumber: number,
-    expiry,
-    securityCode,
-    expiresAt: Math.max(Date.now() + 30 * 60_000, releaseTime + 60 * 60_000),
-    createdAt: Date.now()
-  };
-}
-
-async function savePaymentAutofill(reservation, scheduling = false) {
-  const payment = readPaymentAutofill(reservation, scheduling);
-  await chrome.storage.session.remove("paymentAutofillResult");
-  if (payment) await chrome.storage.session.set({ paymentAutofillSession: payment });
-  else await chrome.storage.session.remove("paymentAutofillSession");
 }
 
 function isInlineUrl(value) {
@@ -302,15 +226,44 @@ function validate(reservation, scheduling = false) {
 async function save(reservation, scheduling = false) {
   validate(reservation, scheduling);
   await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"]);
-  await chrome.storage.local.set({ reservation, flowStatus: "準備開始" });
+  await chrome.storage.local.set({ reservation, flowStatus: "準備開始", loadedPageHelperStage: "" });
 }
 
+document.querySelector("#fill-contact-details").addEventListener("click", async () => {
+  const button = document.querySelector("#fill-contact-details");
+  button.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "FILL_CONTACT_FROM_POPUP" });
+    if (!response?.ok) throw new Error(response?.error || "目前頁面無法補填聯絡資料。");
+    setStatus("聯絡資料已填入；信用卡若位於金流 iframe，請在 inline 頁面手動填寫。", "ok");
+    await checkBackgroundVersion();
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector("#resume-current-flow").addEventListener("click", async () => {
+  const button = document.querySelector("#resume-current-flow");
+  button.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "RESUME_CURRENT_FLOW" });
+    if (!response?.ok) throw new Error(response?.error || "無法接手目前頁面。");
+    setStatus("已接手目前 inline 分頁；遇到條款、付款或最後確認時會停下等你操作。", "ok");
+    await checkBackgroundVersion();
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+});
+
 async function restore() {
-  const { reservation, lastOpenedAt, flowStatus, flowStatusKind, lastSelectedDate, selectedRunMode } = await chrome.storage.local.get([
-    "reservation", "lastOpenedAt", "flowStatus", "flowStatusKind", "lastSelectedDate", "selectedRunMode"
+  await chrome.runtime.sendMessage({ type: "PING_BACKGROUND" });
+  const { reservation, lastOpenedAt, flowStatus, flowStatusKind, lastSelectedDate } = await chrome.storage.local.get([
+    "reservation", "lastOpenedAt", "flowStatus", "flowStatusKind", "lastSelectedDate"
   ]);
-  liveMode.checked = selectedRunMode === "live" || (selectedRunMode === undefined && reservation?.autoSubmit === true);
-  renderRunMode();
   fields.dateStart.value ||= localDate(1);
   fields.dateEnd.value ||= localDate(7);
   if (reservation) {
@@ -341,8 +294,8 @@ saveSettingsButton.addEventListener("click", async () => {
     await chrome.storage.local.remove(["activeReservationTabId", "pendingRestaurantSearch"]);
     await chrome.storage.local.set({
       reservation,
-      selectedRunMode: reservation.autoSubmit ? "live" : "preview",
-      settingsSavedAt: Date.now()
+      settingsSavedAt: Date.now(),
+      loadedPageHelperStage: ""
     });
     renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     setStatus("設定已儲存在這台瀏覽器；尚未開始找位。", "ok");
@@ -355,8 +308,6 @@ saveSettingsButton.addEventListener("click", async () => {
 document.querySelector("#schedule").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
-    validate(reservation, true);
-    await savePaymentAutofill(reservation, true);
     await save(reservation, true);
     renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const when = new Date(reservation.releaseAt).getTime();
@@ -370,15 +321,11 @@ document.querySelector("#schedule").addEventListener("click", async () => {
 document.querySelector("#open-now").addEventListener("click", async () => {
   try {
     const reservation = readReservation();
-    validate(reservation);
-    await savePaymentAutofill(reservation);
     await save(reservation);
     renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
-    const modeText = reservation.autoSubmit
-      ? `實際模式：條款與金額會自動確認；${paymentAutofill.checked ? "信用卡會使用本次暫存資料代填；" : "需要填卡時會停止；"}OTP 或 CAPTCHA 仍需手動。`
-      : "模擬模式：只找位與填寫，會停在最後送出前。";
+    const modeText = "助手只找位與填寫；付款、條款同意及最後確認由你操作。";
     const searchText = response.mode === "url"
       ? "已忽略排程時間，立即開始尋找可用時段。"
       : "已忽略排程時間並開啟 inline 官方搜尋；若有多家分店，請選擇一次。";
@@ -388,15 +335,9 @@ document.querySelector("#open-now").addEventListener("click", async () => {
 
 document.querySelector("#cancel").addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "CANCEL" });
-  await chrome.storage.session.remove("paymentAutofillSession");
-  paymentAutofill.checked = false;
-  paymentFields.hidden = true;
-  clearPaymentInputs();
   const { reservation } = await chrome.storage.local.get("reservation");
-  if (reservation) await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "排程已取消" });
+  if (reservation) await chrome.storage.local.set({ reservation: { ...reservation, enabled: false }, flowStatus: "排程已取消", loadedPageHelperStage: "" });
   setStatus("排程已取消。");
 });
 
-liveMode.checked = false;
-renderRunMode();
 Promise.all([restore(), renderInitialUpdateStatus(), checkBackgroundVersion()]).catch((error) => setStatus(error.message, "error"));

@@ -52,7 +52,12 @@
     const normalized = normalizeRestaurantInput(urlValue);
     if (normalized.kind !== "url") return "";
     const match = normalized.value.match(/\/booking\/([^/?#]+)\/([^/?#]+)/i);
-    return match ? `${match[1]}/${match[2]}` : "";
+    if (!match) return "";
+    try {
+      return `${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}`;
+    } catch (_error) {
+      return "";
+    }
   }
 
   function canAdoptFormScope({ senderUrl, expectedUrl, senderActive, reservationEnabled }) {
@@ -60,9 +65,31 @@
     const expectedIdentity = bookingIdentity(expectedUrl);
     return Boolean(
       reservationEnabled && senderActive &&
-      /\/form\/?(?:[?#]|$)/i.test(String(senderUrl || "")) &&
+      /\/(?:form|payment|checkout|confirm|confirmation)\/?(?:[?#]|$)/i.test(String(senderUrl || "")) &&
       senderIdentity && senderIdentity === expectedIdentity
     );
+  }
+
+  function paymentFieldKind(hint) {
+    const value = String(hint || "").toLowerCase();
+    if (/autocomplete[:=\s"']*cc-number|卡號|card[\s_-]*(?:number|no\.?|num)|credit[\s_-]*card[\s_-]*(?:number|no)/i.test(value)) return "number";
+    if (/autocomplete[:=\s"']*cc-exp-month|到期月份|有效月份|exp(?:iry|iration|ired)?[\s_-]*month/i.test(value)) return "expiryMonth";
+    if (/autocomplete[:=\s"']*cc-exp-year|到期年份|有效年份|exp(?:iry|iration|ired)?[\s_-]*year/i.test(value)) return "expiryYear";
+    if (/autocomplete[:=\s"']*cc-(?:exp|exp-month|exp-year)|有效期限|到期日|到期日期|expiry|expiration|exp[\s_-]*(?:date|month|year)/i.test(value)) return "expiry";
+    if (/autocomplete[:=\s"']*cc-csc|安全碼|(?:信用卡|卡片)驗證碼|cvv|cvc|csc|security[\s_-]*code/i.test(value)) return "cvc";
+    if (/autocomplete[:=\s"']*cc-name|持卡人|card[\s_-]*holder|name[\s_-]*on[\s_-]*card/i.test(value)) return "holder";
+    return "";
+  }
+
+  function contactFieldKind(hint) {
+    const value = String(hint || "").toLowerCase();
+    if (paymentFieldKind(value)) return "";
+    if (/autocomplete[:=\s"']*family-name|姓氏|family[\s_-]*name|surname/i.test(value)) return "family";
+    if (/autocomplete[:=\s"']*given-name|名字|given[\s_-]*name|first[\s_-]*name/i.test(value)) return "given";
+    if (/autocomplete[:=\s"']*tel|type[:=\s"']*tel|手機|電話|mobile|phone|telephone/i.test(value)) return "phone";
+    if (/autocomplete[:=\s"']*email|type[:=\s"']*email|電子信箱|電子郵件|e-?mail|信箱/i.test(value)) return "email";
+    if (/autocomplete[:=\s"']*name|訂位人|聯絡人|姓名|full[\s_-]*name|\bname\b/i.test(value)) return "name";
+    return "";
   }
 
   function matchingBookingTabIds(tabs, expectedUrl) {
@@ -130,13 +157,6 @@
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
-  function finalSubmitAction({ autoSubmit, submitAttemptedAt, hasFinalButton }) {
-    if (!hasFinalButton) return autoSubmit ? "idle" : "processing";
-    if (!autoSubmit) return "preview";
-    if (submitAttemptedAt) return "wait";
-    return "submit";
-  }
-
   function isAutoConsentText(value) {
     return /我已閱讀並同意|我同意.*(?:信用卡綁定|預收取消費|須知|服務條款|隱私權)|同意.*規則|同意.*注意事項|接受.*條款/.test(String(value || "").trim());
   }
@@ -181,13 +201,14 @@
     setUrlQueryParams,
     bookingIdentity,
     canAdoptFormScope,
+    paymentFieldKind,
+    contactFieldKind,
     matchingBookingTabIds,
     restaurantMatchScore,
     selectRestaurantMatch,
     normalizeTime,
     timeToMinutes,
     dateTextToIso,
-    finalSubmitAction,
     isAutoConsentText,
     splitContactName,
     controlStateIsSelected,
