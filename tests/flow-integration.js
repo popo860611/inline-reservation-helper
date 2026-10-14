@@ -220,10 +220,11 @@ async function testDateRangeScansEveryDay() {
   assert.ok(statuses.some((message) => message.status === "日期載入失敗"));
 }
 
-async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel = "下一步，填寫訂位資料", onForm = false) {
+async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel = "下一步，填寫訂位資料", onForm = false, withdrawn = false) {
   let now = 10000;
   class TestDate extends Date { static now() { return now; } }
   let selected = onForm;
+  let withdrawnAfterClick = false;
   let slotClicks = 0;
   let nextClicks = 0;
   let redirects = 0;
@@ -232,15 +233,15 @@ async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel
   const saved = new Map([["inlineHelperFlowV2", JSON.stringify({ timeSelectedAt: 1000 })]]);
   const reservation = { enabled: true, restaurantQuery: bookingUrl, adults: 2,
     dateStart: "2026-10-17", dateEnd: "2026-10-30", timeStart: "17:30", timeEnd: "19:30" };
-  const slot = { tagName: "BUTTON", textContent: "10月17日17:30", disabled: footerOnly,
-    classList: { contains: (name) => name === "time-slot" || (footerOnly && name === "full") },
+  const slot = { tagName: "BUTTON", textContent: "10月17日17:30", get disabled() { return footerOnly || withdrawnAfterClick; },
+    classList: { contains: (name) => name === "time-slot" || ((footerOnly || withdrawnAfterClick) && name === "full") },
     getAttribute: () => null, getBoundingClientRect: () => ({ width: 100, height: 40 }),
     click: () => { slotClicks += 1; selected = accept; } };
   const summary = { ...slot, textContent: "17:30", disabled: false,
     classList: { contains: () => false },
     click: () => { throw new Error("A booking summary is not an available slot"); } };
   const next = { ...summary, textContent: nextLabel,
-    get disabled() { return !selected; }, click: () => { nextClicks += 1; } };
+    get disabled() { return !selected; }, click: () => { nextClicks += 1; if (withdrawn) { selected = false; withdrawnAfterClick = true; } } };
   const chrome = {
     runtime: { sendMessage: async () => ({ active: true }), onMessage: { addListener() {} } },
     storage: { local: { get: async () => ({ reservation, lastSelectedDate: "2026-10-17" }), set: async () => {} }, onChanged: { addListener() {} } }
@@ -262,7 +263,7 @@ async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel
     assert.equal(JSON.parse(saved.get("inlineHelperFlowV2")).timeSelectedAt, undefined,
       "Clicking a slot must not count as an accepted selection");
   }
-  for (let step = 0; step < 20 && timers.size && !redirects && !nextClicks; step += 1) {
+  for (let step = 0; step < 20 && timers.size && !redirects && (!nextClicks || withdrawn); step += 1) {
     now += 500;
     const [id, callback] = timers.entries().next().value;
     timers.delete(id); callback();
@@ -272,6 +273,10 @@ async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel
     assert.equal(slotClicks, 0);
     assert.equal(nextClicks, 0, "Never click 完成預訂 on a contact form");
     assert.equal(redirects, 0);
+  } else if (withdrawn) {
+    assert.equal(slotClicks, 1);
+    assert.equal(nextClicks, 1);
+    assert.equal(redirects, 1, "Server withdrawal must resume date scanning instead of waiting for details");
   } else if (accept) {
     assert.equal(slotClicks, 1);
     assert.equal(nextClicks, 1, "Recognize inline selection in the footer and the next-button wording");
@@ -781,6 +786,7 @@ Promise.all([
   testTimeSelectionAcceptance(true),
   testTimeSelectionAcceptance(true, false, "完成預訂"),
   testTimeSelectionAcceptance(true, false, "完成預訂", true),
+  testTimeSelectionAcceptance(true, false, "完成預訂", false, true),
   testTimeSelectionAcceptance(false),
   testTimeSelectionAcceptance(false, true),
   testTapPayRequiresManualCard(),

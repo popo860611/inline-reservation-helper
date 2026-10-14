@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.48";
+  const CONTENT_VERSION = "0.3.50";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -45,6 +45,8 @@
   setConsentNoticeSuppressed(!findManualConsentControl({ modalOnly: true }));
 
   function report(status, detail, kind = "ok") {
+    document.documentElement.dataset.inlineHelperStatus = status;
+    document.documentElement.dataset.inlineHelperDetail = detail;
     chrome.runtime.sendMessage({ type: "FLOW_STATUS", status, detail, kind }).catch(() => {});
   }
 
@@ -658,6 +660,7 @@
       }
 
       const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
+      document.documentElement.dataset.inlineHelperTargetDate = lastSelectedDate || reservation.dateStart;
       const shownDate = pageSelectedDate();
       if (adultPicker && shownDate && lastSelectedDate && shownDate.value !== lastSelectedDate) {
         const dateResult = selectTargetCalendarDate(lastSelectedDate, shownDate.element);
@@ -683,17 +686,24 @@
       const selectedTimeIsValid = timeButtonIsInRange(selectedTime, reservation.timeStart, reservation.timeEnd);
       if (adultPicker && selectedTimeIsValid && (!state.timeSelectedAt || state.selectionVerifiedVersion !== CONTENT_VERSION)) {
         state.timeSelectedAt ||= Date.now();
+        state.selectedMinutes = InlineHelperCommon.timeToMinutes(selectedTime.textContent);
         state.selectionVerifiedVersion = CONTENT_VERSION;
         delete state.pendingTimeSelection;
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
       }
       if (adultPicker && !selectedTimeIsValid && state.timeSelectedAt &&
-          (!state.bookingButtonClickedAt || state.selectionVerifiedVersion !== CONTENT_VERSION)) {
+          (!state.bookingButtonClickedAt || state.selectionVerifiedVersion !== CONTENT_VERSION ||
+           (findTimeButtons({ includeUnavailable: true }).length &&
+            !findBookingDetailsButton({ allowSelectionContinue: true })))) {
         // Older versions recorded a click before inline accepted the selection.
         delete state.timeSelectedAt;
         delete state.bookingButtonClickedAt;
         delete state.bookingButtonAttempts;
+        delete state.selectionVerifiedVersion;
+        delete state.selectedMinutes;
+        delete state.pendingTimeSelection;
         sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+        report("時段已失效", "inline 已撤回時段選取，正在重新檢查可用時段與日期");
       }
       if (adultPicker && !selectedTimeIsValid && !state.timeSelectedAt) {
         const scanDate = lastSelectedDate || reservation.dateStart;
