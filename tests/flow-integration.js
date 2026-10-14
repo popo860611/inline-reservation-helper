@@ -387,7 +387,7 @@ async function testWaitingFlowRecovers() {
   assert.equal(reservation.enabled, true);
 }
 
-async function testTapPayRequiresManualCard() {
+async function testTapPayRequiresManualCard(autoSubmit = false) {
   const holder = paymentInput("持卡人姓名");
   const frame = {
     src: "https://js.tappaysdk.com/sdk/tpdirect/tappay-field/html/v5.14.0",
@@ -395,7 +395,7 @@ async function testTapPayRequiresManualCard() {
   };
   const messages = [];
   const writes = [];
-  const reservation = { enabled: true, restaurantQuery: bookingUrl };
+  const reservation = { enabled: true, restaurantQuery: bookingUrl, autoSubmit };
   const document = {
     documentElement: { dataset: {} }, body: { innerText: "" },
     querySelectorAll: (selector) => selector === "input" ? [holder] :
@@ -680,7 +680,7 @@ async function testConsentResumesWithoutDisablingTask() {
 
 async function testScopedBackgroundRelay() {
   const stored = {
-    flowScopeMigration: "0.3.32",
+    flowScopeMigration: "0.3.51",
     activeReservationTabId: 7,
     lastOpenedUrl: bookingUrl,
     reservation: { restaurantQuery: bookingUrl, enabled: false },
@@ -762,7 +762,7 @@ async function testScopedBackgroundRelay() {
   const resume = (data) => new Promise((resolve) => messageHandler({ type: "RESUME_CURRENT_FLOW" }, data, resolve));
   assert.equal((await resume(sender)).ok, true);
   assert.equal(stored.reservation.enabled, true);
-  assert.equal(stored.reservation.autoSubmit, false);
+  assert.equal(stored.reservation.autoSubmit, true);
   assert.equal(stored.activeReservationTabId, 7);
   assert.deepEqual(injected.slice(-2), ["common.js", "content.js"]);
   assert.equal(sent.at(-1).message.type, "ADVANCE_FLOW");
@@ -790,6 +790,7 @@ Promise.all([
   testTimeSelectionAcceptance(false),
   testTimeSelectionAcceptance(false, true),
   testTapPayRequiresManualCard(),
+  testTapPayRequiresManualCard(true),
   testOldConsentNoticeClearsAfterTaskStops(),
   testDepositConsentDoesNotRecreateRulesNotice(true),
   testDepositConsentDoesNotRecreateRulesNotice(false),

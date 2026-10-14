@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.50";
+  const CONTENT_VERSION = "0.3.51";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
@@ -138,16 +138,16 @@
         button:focus-visible{outline:3px solid #f4b740;outline-offset:3px}
         @media (prefers-reduced-motion:no-preference){.card{animation:enter .2s ease-out}@keyframes enter{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}}
       </style>
-      <p class="sr-only" role="status" aria-live="assertive" aria-atomic="true">等待手動確認，尚未送出訂位。</p>
+      <p class="sr-only" role="status" aria-live="assertive" aria-atomic="true">預演完成，尚未送出訂位。</p>
       <section class="card" role="dialog" aria-modal="true" aria-labelledby="inline-helper-preview-title" aria-describedby="inline-helper-preview-description">
         <div class="head">
           <span class="icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <h2 id="inline-helper-preview-title">等待手動確認</h2>
+          <h2 id="inline-helper-preview-title">預演完成</h2>
         </div>
         <div class="body">
           <p class="lead">已找到可用時段，並填妥目前頁面的訂位資料。</p>
           <p class="warning">尚未送出訂位</p>
-          <p class="note" id="inline-helper-preview-description">這不代表訂位成功。請自行核對資料並決定是否按下最後的確認訂位按鈕。</p>
+          <p class="note" id="inline-helper-preview-description">這是預演結果，不代表訂位成功。插件沒有按下最後的確認訂位按鈕。</p>
           <button type="button">我知道了</button>
         </div>
       </section>`;
@@ -686,6 +686,7 @@
       const selectedTimeIsValid = timeButtonIsInRange(selectedTime, reservation.timeStart, reservation.timeEnd);
       if (adultPicker && selectedTimeIsValid && (!state.timeSelectedAt || state.selectionVerifiedVersion !== CONTENT_VERSION)) {
         state.timeSelectedAt ||= Date.now();
+        state.selectedDate = shownDate?.value;
         state.selectedMinutes = InlineHelperCommon.timeToMinutes(selectedTime.textContent);
         state.selectionVerifiedVersion = CONTENT_VERSION;
         delete state.pendingTimeSelection;
@@ -820,7 +821,7 @@
       hideConsentNotice();
 
       if (hasInteractivePaymentStep()) {
-        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+        await chrome.storage.local.set({ reservation: { ...reservation, manualPaymentRequired: true, enabled: false } });
         report("待手動付款", "聯絡資料已填妥；請在 inline 頁面自行填寫信用卡並確認付款。", "ok");
         return;
       }
@@ -840,23 +841,52 @@
       }
 
       const paymentAuthorizationButton = findPaymentAuthorizationButton();
-      if (paymentAuthorizationButton) {
-        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+      if (paymentAuthorizationButton || reservation.manualPaymentRequired) {
+        await chrome.storage.local.set({ reservation: { ...reservation, manualPaymentRequired: true, enabled: false } });
         report("待手動授權", "已停在付款／信用卡授權按鈕前；請自行核對金額並操作，外掛不會按付款", "error");
         return;
       }
 
       const finalButton = exactButton("確認預訂", "確認訂位", "送出訂位", "完成訂位", "送出預訂");
-      if (finalButton) {
-        await chrome.storage.local.set({
-          reservation: { ...reservation, enabled: false },
-          previewCompletedAt: Date.now()
-        });
-        showPreviewComplete();
-        report("待手動確認", "資料已填妥；外掛已停止，請自行核對並按最後確認訂位", "ok");
+      const finalAction = InlineHelperCommon.finalSubmitAction({
+        autoSubmit: reservation.autoSubmit,
+        submitAttemptedAt: reservation.submitAttemptedAt || state.submitAttemptedAt,
+        hasFinalButton: Boolean(finalButton)
+      });
+      if (finalAction === "wait") {
+        watchForProgress = false;
+        report("請確認", "已送出一次，但尚未確認訂位成功；請查看 inline 頁面或通知，助手不會重複送出", "ok");
         return;
       }
-      report("等待頁面", "資料已填妥，等待 inline 顯示下一步；外掛不會自動付款或送出訂位");
+      if (finalButton) {
+        const verifiedDate = shownDate?.value || state.selectedDate;
+        const verifiedMinutes = selectedTime
+          ? InlineHelperCommon.timeToMinutes(selectedTime.textContent) : state.selectedMinutes;
+        if (!verifiedDate || verifiedDate < reservation.dateStart || verifiedDate > reservation.dateEnd ||
+            !Number.isFinite(verifiedMinutes) ||
+            verifiedMinutes < InlineHelperCommon.timeToMinutes(reservation.timeStart) ||
+            verifiedMinutes > InlineHelperCommon.timeToMinutes(reservation.timeEnd)) {
+          watchForProgress = false;
+          report("請核對時段", "無法核對訂位日期與時段符合設定；請在 inline 頁面手動確認，尚未送出訂位", "error");
+          return;
+        }
+        if (finalAction === "preview") {
+          await chrome.storage.local.set({
+            reservation: { ...reservation, enabled: false },
+            previewCompletedAt: Date.now()
+          });
+          showPreviewComplete();
+          report("預演完成", "預演完成：已找到可用時段並填妥資料，尚未送出訂位", "ok");
+          return;
+        }
+        state.submitAttemptedAt = Date.now();
+        sessionStorage.setItem(HELPER_KEY, JSON.stringify(state));
+        await chrome.storage.local.set({ reservation: { ...reservation, submitAttemptedAt: state.submitAttemptedAt } });
+        report("送出中", "正在送出免付款訂位；付款與授權仍由你操作");
+        finalButton.click();
+        return;
+      }
+      report("等待頁面", "資料已填妥，等待 inline 顯示下一步；付款與授權由你操作");
     } catch (error) {
       watchForProgress = false;
       report("發生錯誤", `訂位頁處理失敗：${error?.message || "頁面流程無法繼續"}`, "error");

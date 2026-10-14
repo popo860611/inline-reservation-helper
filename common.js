@@ -157,6 +157,12 @@
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
+  function finalSubmitAction({ autoSubmit, submitAttemptedAt, hasFinalButton }) {
+    if (submitAttemptedAt) return "wait";
+    if (!hasFinalButton) return "processing";
+    return autoSubmit === true ? "submit" : "preview";
+  }
+
   function isAutoConsentText(value) {
     return /我已閱讀並同意|我同意.*(?:信用卡綁定|預收取消費|須知|服務條款|隱私權)|同意.*規則|同意.*注意事項|接受.*條款/.test(String(value || "").trim());
   }
@@ -209,6 +215,7 @@
     normalizeTime,
     timeToMinutes,
     dateTextToIso,
+    finalSubmitAction,
     isAutoConsentText,
     splitContactName,
     controlStateIsSelected,

@@ -1,6 +1,6 @@
 const ALARM_NAME = "inline-reservation-open";
 const PREP_ALARM_NAME = "inline-reservation-prepare";
-const FLOW_SCOPE_MIGRATION = "0.3.32";
+const FLOW_SCOPE_MIGRATION = "0.3.51";
 const RELOAD_INLINE_AFTER_RESTART = "reloadInlineAfterExtensionRestart";
 importScripts("common.js");
 
@@ -15,7 +15,7 @@ async function migrateUnsafeGlobalFlow() {
     flowStatus: "安全更新已停止舊任務；先前的訂位成功狀態未經驗證，請在 inline 或通知中確認",
     flowStatusKind: "ok"
   };
-  if (reservation) updates.reservation = { ...reservation, autoSubmit: false, enabled: false };
+  if (reservation) updates.reservation = { ...reservation, enabled: false };
   await chrome.storage.local.set(updates);
 }
 
@@ -26,6 +26,8 @@ async function reloadActiveReservationTabAfterUpdate() {
   const stored = await chrome.storage.local.get(RELOAD_INLINE_AFTER_RESTART);
   if (!stored[RELOAD_INLINE_AFTER_RESTART]) return;
   await chrome.storage.local.remove(RELOAD_INLINE_AFTER_RESTART);
+  const { reservation } = await chrome.storage.local.get("reservation");
+  if (reservation) await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
   try {
     const tabs = await chrome.tabs.query({ url: ["https://inline.app/booking/*"] });
     const injectableTabs = tabs.filter((tab) => Number.isInteger(tab.id));
@@ -283,7 +285,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
       await chrome.storage.local.set({
         activeReservationTabId: tab.id,
-        reservation: { ...reservation, autoSubmit: false, enabled: true },
+        reservation: { ...reservation, enabled: true },
         flowStatus: "正在接手目前訂位頁",
         flowStatusKind: "ok"
       });

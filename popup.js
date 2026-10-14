@@ -24,7 +24,9 @@ const pageRuntimeVersion = document.querySelector("#page-runtime-version");
 const saveSettingsButton = document.querySelector("#save-settings");
 const saveSettingsStatus = document.querySelector("#save-settings-status");
 const reloadExtensionButton = document.querySelector("#reload-extension");
-const BUILD_VERSION = "0.3.50";
+const liveMode = document.querySelector("#live-mode");
+const modeToggle = document.querySelector("#mode-toggle");
+const BUILD_VERSION = "0.3.51";
 const contactRecoverySection = document.querySelector("#contact-recovery-section");
 const resumeSection = document.querySelector("#resume-section");
 let pendingUpdateAction = null;
@@ -54,6 +56,18 @@ function renderInitialUpdateStatus() {
 
   updateMode.textContent = `目前 v${BUILD_VERSION}｜尚未手動檢查`;
 }
+
+function renderRunMode() {
+  modeToggle.textContent = liveMode.checked ? "實際｜自動確認" : "預演｜不送出";
+  modeToggle.classList.toggle("live", liveMode.checked);
+  modeToggle.setAttribute("aria-pressed", String(liveMode.checked));
+}
+
+modeToggle.addEventListener("click", () => {
+  liveMode.checked = !liveMode.checked;
+  renderRunMode();
+  renderSettingsStatus("有尚未儲存的變更", "dirty");
+});
 
 function renderSettingsStatus(message, kind = "") {
   saveSettingsStatus.textContent = message;
@@ -186,7 +200,7 @@ function readReservation() {
   const value = Object.fromEntries(Object.entries(fields).map(([key, element]) => [
     key, element.type === "checkbox" ? element.checked : element.value.trim()
   ]));
-  value.autoSubmit = false;
+  value.autoSubmit = liveMode.checked;
   return {
     ...value,
     adults: Number(value.adults),
@@ -250,7 +264,7 @@ document.querySelector("#resume-current-flow").addEventListener("click", async (
   try {
     const response = await chrome.runtime.sendMessage({ type: "RESUME_CURRENT_FLOW" });
     if (!response?.ok) throw new Error(response?.error || "無法接手目前頁面。");
-    setStatus("已接手目前 inline 分頁；遇到條款、付款或最後確認時會停下等你操作。", "ok");
+    setStatus("已接手目前 inline 分頁；依已儲存模式繼續；條款需你同意，付款仍由你操作。", "ok");
     await checkBackgroundVersion();
   } catch (error) {
     setStatus(error.message, "error");
@@ -277,6 +291,8 @@ async function restore() {
   } else {
     renderSettingsStatus("尚未儲存");
   }
+  liveMode.checked = reservation?.autoSubmit === true;
+  renderRunMode();
   const alarm = await chrome.alarms.get("inline-reservation-open");
   if (flowStatus) setStatus(
     `${flowStatus}${lastSelectedDate ? `；目前日期 ${lastSelectedDate}` : ""}`,
@@ -325,7 +341,9 @@ document.querySelector("#open-now").addEventListener("click", async () => {
     renderSettingsStatus(`設定已儲存 ${checkedAt()}`, "saved");
     const response = await chrome.runtime.sendMessage({ type: "OPEN_NOW", reservation });
     if (!response?.ok) throw new Error(response?.error || "無法開始找位。");
-    const modeText = "助手只找位與填寫；付款、條款同意及最後確認由你操作。";
+    const modeText = reservation.autoSubmit
+      ? "實際模式：免付款訂位會自動確認；條款需你同意，付款、CAPTCHA 與 OTP 由你操作。"
+      : "預演模式：只找位與填寫，停在最後送出前；付款由你操作。";
     const searchText = response.mode === "url"
       ? "已忽略排程時間，立即開始尋找可用時段。"
       : "已忽略排程時間並開啟 inline 官方搜尋；若有多家分店，請選擇一次。";

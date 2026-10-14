@@ -14,7 +14,8 @@
             <p class="eyebrow">RESERVATION HELPER</p>
             <h1>inline 訂位快手</h1>
           </div>
-          <span class="mode-badge">由使用者確認</span>
+          <input id="live-mode" type="checkbox" hidden />
+          <button id="mode-toggle" class="mode-badge" type="button" aria-pressed="false" title="點擊切換執行模式">預演｜不送出</button>
         </div>
         <p class="lead">輸入餐廳與可接受區間，其餘交給訂位助手。</p>
       </header>
@@ -29,7 +30,7 @@
         <span class="update-dot" aria-hidden="true"></span>
         <span class="update-copy"><strong>GitHub 版本（手動）</strong><span id="update-mode">尚未手動檢查</span><span id="page-runtime-version">頁面助手：尚未偵測</span></span>
         <button id="apply-update" class="update-button" type="button">檢查更新</button>
-        <span id="extension-version" class="version-pill">v0.3.50</span>
+        <span id="extension-version" class="version-pill">v0.3.51</span>
       </section>
 
       <section id="contact-recovery-section" class="form-section" hidden>
@@ -116,7 +117,7 @@
         <button id="cancel" class="quiet" type="button">取消排程</button>
 
       <section id="status" role="status" tabindex="-1" aria-live="polite" aria-atomic="true"></section>
-      <p class="footnote">信用卡資料、CAPTCHA、OTP、付款及最後確認由你在 inline 頁面操作。</p>
+      <p class="footnote">信用卡資料、CAPTCHA、OTP、付款由你在 inline 頁面操作；實際模式會自動確認免付款訂位。</p>
     </main>
     <script src="common.js"></script>
     <script src="update-config.js"></script>
