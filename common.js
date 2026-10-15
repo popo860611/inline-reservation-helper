@@ -157,6 +157,40 @@
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
+  function dateMatchesDayType(value, dayType = "all") {
+    if (!/^20\d{2}-\d{2}-\d{2}$/.test(value || "") || dateTextToIso(value) !== value) return false;
+    const day = new Date(`${value}T12:00:00`).getDay();
+    if (dayType === "weekday") return day >= 1 && day <= 5;
+    if (dayType === "weekend") return day === 0 || day === 6;
+    return dayType === "all";
+  }
+
+  // Inclusive search; calendar arithmetic at local noon avoids UTC date shifts.
+  function nextMatchingDate(start, end, dayType = "all") {
+    if (!dateMatchesDayType(start) || !dateMatchesDayType(end) || start > end) return null;
+    const date = new Date(`${start}T12:00:00`);
+    let value = start;
+    while (value <= end) {
+      if (dateMatchesDayType(value, dayType)) return value;
+      date.setDate(date.getDate() + 1);
+      value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+    return null;
+  }
+
+  function countMatchingDates(start, end, dayType = "all") {
+    if (!dateMatchesDayType(start) || !dateMatchesDayType(end) || start > end) return 0;
+    const date = new Date(`${start}T12:00:00`);
+    let count = 0;
+    let value = start;
+    while (value <= end) {
+      if (dateMatchesDayType(value, dayType)) count += 1;
+      date.setDate(date.getDate() + 1);
+      value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+    return count;
+  }
+
   function finalSubmitAction({ autoSubmit, submitAttemptedAt, hasFinalButton }) {
     if (submitAttemptedAt) return "wait";
     if (!hasFinalButton) return "processing";
@@ -215,6 +249,9 @@
     normalizeTime,
     timeToMinutes,
     dateTextToIso,
+    dateMatchesDayType,
+    nextMatchingDate,
+    countMatchingDates,
     finalSubmitAction,
     isAutoConsentText,
     splitContactName,

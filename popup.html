@@ -61,6 +61,14 @@
             <label>開始日期<input id="date-start" type="date" required /></label>
             <label>結束日期<input id="date-end" type="date" required /></label>
           </div>
+          <label>日期類型
+            <select id="day-type" aria-describedby="day-type-help">
+              <option value="all">不限</option>
+              <option value="weekday">平日（週一至五）</option>
+              <option value="weekend">假日（週六、日）</option>
+            </select>
+          </label>
+          <p id="day-type-help" class="helper">依星期區分，不含國定假日與補班調整。日期區間最多 60 個日曆天，符合條件的日期最多 30 個。</p>
           <div class="grid">
             <label>最早時間<input id="time-start" type="time" value="11:30" required /></label>
             <label>最晚時間<input id="time-end" type="time" value="12:30" required /></label>

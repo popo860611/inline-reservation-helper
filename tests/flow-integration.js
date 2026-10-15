@@ -145,11 +145,16 @@ async function testDateScanStopsAfterTimeOrDetails() {
   await runScenario({ offerTime: false, revealDetailsBeforeTimer: true });
 }
 
-async function testDateRangeScansEveryDay() {
+async function testDateRangeScansEveryDay(dayType) {
   const reservation = { enabled: true, restaurantQuery: bookingUrl, adults: 2,
-    dateStart: "2026-10-17", dateEnd: "2026-10-30", timeStart: "17:30", timeEnd: "19:30" };
+    dateStart: "2026-10-17", dateEnd: "2026-10-30", timeStart: "17:30", timeEnd: "19:30", dayType };
   const saved = new Map([["inlineHelperFlowV2", JSON.stringify({ scanCount: 14 })]]);
-  let current = reservation.dateStart;
+  const dates = [];
+  for (let day = 17; day <= 30; day += 1) {
+    const value = `2026-10-${day}`;
+    if (common.dateMatchesDayType(value, dayType)) dates.push(value);
+  }
+  let current = dates[0];
   let now = 10000;
   class TestDate extends Date { static now() { return now; } }
   let observerCallback;
@@ -198,18 +203,18 @@ async function testDateRangeScansEveryDay() {
   await new Promise(setImmediate);
   assert.equal(countWrites, 1, "DOM changes must not duplicate next-day navigation");
   assert.equal(redirects.length, 1);
-  assert.equal(current, "2026-10-18");
-  for (let day = 18; day <= 30; day += 1) {
+  assert.equal(current, dates[1]);
+  for (let index = 1; index < dates.length; index += 1) {
     mount();
     await new Promise(setImmediate);
   }
-  assert.equal(current, "2026-10-30");
-  assert.equal(countWrites, 13, "Scan through the configured last day despite stale scan counters");
-  assert.equal(redirects.length, 13);
+  assert.equal(current, dates.at(-1));
+  assert.equal(countWrites, dates.length - 1, "Scan only matching dates despite stale scan counters");
+  assert.equal(redirects.length, dates.length - 1);
   assert.equal(reservation.enabled, false);
   assert.ok(statuses.some((message) => message.status === "沒有空位"));
   reservation.enabled = true;
-  current = reservation.dateStart;
+  current = dates[0];
   const stalledTimers = mount();
   await new Promise(setImmediate);
   now += 6000;
@@ -218,6 +223,36 @@ async function testDateRangeScansEveryDay() {
   await new Promise(setImmediate);
   assert.equal(reservation.enabled, false);
   assert.ok(statuses.some((message) => message.status === "日期載入失敗"));
+}
+
+async function testUnavailableFilteredDate(dayType, start, expected) {
+  const reservation = { enabled: true, restaurantQuery: bookingUrl, adults: 2,
+    dateStart: start, dateEnd: "2026-10-26", dayType };
+  let current = start;
+  const statuses = [];
+  const visibleNode = { getBoundingClientRect: () => ({ width: 100, height: 40 }) };
+  const chrome = {
+    runtime: { sendMessage: async (message) => { statuses.push(message); return { active: true }; }, onMessage: { addListener() {} } },
+    storage: { local: {
+      get: async () => ({ reservation, lastSelectedDate: current }),
+      set: async (value) => { if (value.lastSelectedDate) current = value.lastSelectedDate; }
+    }, onChanged: { addListener() {} } }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
+    document: { documentElement: { dataset: {} }, body: { innerText: "" },
+      querySelector: (selector) => selector === "#adult-picker" ? { value: "2", options: [] } :
+        selector === `[data-date="${start}"]` ? visibleNode : null,
+      querySelectorAll: (selector) => selector === 'input[type="date"]' ? [{ ...visibleNode, value: "2026-10-01" }] : [] },
+    chrome, InlineHelperCommon: common, URLSearchParams,
+    location: { href: `${bookingUrl}?inline_helper=1`, search: "?inline_helper=1", pathname: "/booking/-company/-branch" },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    MutationObserver: class { observe() {} disconnect() {} },
+    getComputedStyle: () => ({ display: "block", visibility: "visible", cursor: "default" }),
+    setTimeout: () => 0, clearTimeout() {}
+  });
+  await new Promise(setImmediate);
+  assert.equal(current, expected);
+  assert.ok(statuses.some((message) => message.status === "下一天"));
 }
 
 async function testTimeSelectionAcceptance(accept, footerOnly = false, nextLabel = "下一步，填寫訂位資料", onForm = false, withdrawn = false) {
@@ -298,7 +333,7 @@ async function testWaitingFlowRecovers() {
   let releaseScope;
   let storageCallback;
   let clicks = 0;
-  let reservation = { enabled: true, adults: 2, timeStart: "17:30", timeEnd: "18:00" };
+  let reservation = { enabled: true, dateStart: "2026-10-14", dateEnd: "2026-10-14", adults: 2, timeStart: "17:30", timeEnd: "18:00" };
   const messages = [];
   const timers = new Map();
   const saved = new Map();
@@ -325,7 +360,7 @@ async function testWaitingFlowRecovers() {
         return { active };
       }, onMessage: { addListener() {} }
     },
-    storage: { local: { get: async () => ({ reservation }), set: async (value) => { reservation = value.reservation; } }, onChanged: { addListener(callback) { storageCallback = callback; } } }
+    storage: { local: { get: async () => ({ reservation }), set: async (value) => { if (value.reservation) reservation = value.reservation; } }, onChanged: { addListener(callback) { storageCallback = callback; } } }
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
     document, chrome, InlineHelperCommon: common,
@@ -555,7 +590,7 @@ async function testDepositConsentDoesNotRecreateRulesNotice(payment) {
   };
   const chrome = {
     runtime: { sendMessage: async (message) => { messages.push(message); return { active: true }; }, onMessage: { addListener() {} } },
-    storage: { local: { get: async () => ({ reservation }), set: async (value) => { reservation = value.reservation; } }, onChanged: { addListener() {} } }
+    storage: { local: { get: async () => ({ reservation }), set: async (value) => { if (value.reservation) reservation = value.reservation; } }, onChanged: { addListener() {} } }
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, "content.js"), "utf8"), {
     document, chrome, InlineHelperCommon: common,
@@ -782,7 +817,11 @@ Promise.all([
   testContactFill("", "測試姓名", false),
   testDateScanStopsAfterTimeOrDetails(),
   testWaitingFlowRecovers(),
+  testUnavailableFilteredDate("weekday", "2026-10-16", "2026-10-19"),
+  testUnavailableFilteredDate("weekend", "2026-10-18", "2026-10-24"),
   testDateRangeScansEveryDay(),
+  testDateRangeScansEveryDay("weekday"),
+  testDateRangeScansEveryDay("weekend"),
   testTimeSelectionAcceptance(true),
   testTimeSelectionAcceptance(true, false, "完成預訂"),
   testTimeSelectionAcceptance(true, false, "完成預訂", true),

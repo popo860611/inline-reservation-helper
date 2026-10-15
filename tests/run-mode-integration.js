@@ -102,12 +102,16 @@ async function testPopupModes() {
   }
   const click = async (selector) => { await element(selector).listeners.click(); await flush(); };
   await open();
+  assert.equal(element('#day-type').value, 'all');
+  element('#day-type').value = 'weekday';
   assert.equal(element('#mode-toggle').textContent, '實際｜自動確認');
   await click('#mode-toggle');
   assert.equal(element('#mode-toggle').attributes['aria-pressed'], 'false');
   await click('#save-settings');
   assert.equal(stored.reservation.autoSubmit, false);
+  assert.equal(stored.reservation.dayType, 'weekday');
   await open();
+  assert.equal(element('#day-type').value, 'weekday');
   assert.equal(element('#mode-toggle').textContent, '預演｜不送出');
   await click('#mode-toggle');
   await click('#open-now');
@@ -115,11 +119,66 @@ async function testPopupModes() {
   await click('#schedule');
   assert.equal(stored.reservation.autoSubmit, true);
   assert.ok(messages.some((message) => message.type === 'SCHEDULE'));
+  element('#day-type').value = 'weekend';
+  const before = messages.length;
+  await click('#open-now');
+  await click('#schedule');
+  assert.equal(messages.slice(before).some((message) => ['OPEN_NOW', 'SCHEDULE'].includes(message.type)), false);
+  assert.match(element('#status').textContent, /沒有符合日期類型/);
+  // Both launch paths must enforce calendar span and matching-date limits.
+  for (const [start, end, dayType, error] of [
+    ['2026-10-01', '2026-10-15', 'all', null],
+    ['2026-10-01', '2026-10-30', 'all', null],
+    ['2026-10-01', '2026-10-31', 'all', /31 個符合條件.*最多搜尋 30 個/],
+    ['2026-10-01', '2026-11-29', 'weekend', null],
+    ['2026-10-01', '2026-11-30', 'weekend', /最多 60 個日曆天/],
+    ['2026-10-19', '2026-11-27', 'weekday', null],
+    ['2026-10-19', '2026-11-30', 'weekday', /31 個符合條件.*最多搜尋 30 個/]
+  ]) {
+    element('#date-start').value = start;
+    element('#date-end').value = end;
+    element('#day-type').value = dayType;
+    for (const [selector, type] of [['#open-now', 'OPEN_NOW'], ['#schedule', 'SCHEDULE']]) {
+      const before = messages.length;
+      await click(selector);
+      assert.equal(messages.slice(before).filter((message) => message.type === type).length, error ? 0 : 1,
+        `${type}: ${start}–${end}, ${dayType}`);
+      if (error) assert.match(element('#status').textContent, error);
+    }
+  }
   await click('#resume-current-flow');
   assert.equal(stored.reservation.autoSubmit, true);
   stored.reservation = { ...stored.reservation, autoSubmit: undefined };
   await open();
   assert.equal(element('#live-mode').checked, false);
+}
+
+async function testFilteredStartup() {
+  const stored = { flowScopeMigration: '0.3.51', reservation: {
+    enabled: true, restaurantQuery: 'https://inline.app/booking/-company/-branch',
+    dateStart: '2026-10-16', dateEnd: '2026-10-19', dayType: 'weekend', adults: 2
+  } };
+  const opened = [];
+  let onMessage, onAlarm;
+  const chrome = {
+    storage: { local: { get: async () => stored, set: async (value) => Object.assign(stored, value), remove: async () => {} } },
+    runtime: { onMessage: { addListener(handler) { onMessage = handler; } }, onStartup: { addListener() {} }, onInstalled: { addListener() {} } },
+    tabs: { create: async (options) => { opened.push(options); return { id: 1 }; } },
+    action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
+    alarms: { onAlarm: { addListener(handler) { onAlarm = handler; } } }
+  };
+  vm.runInNewContext(source('background.js'), { chrome, InlineHelperCommon: common, importScripts() {},
+    TextEncoder, btoa: (value) => Buffer.from(value, 'binary').toString('base64') });
+  await flush();
+  const result = await new Promise((resolve) => onMessage({ type: 'OPEN_NOW', reservation: stored.reservation }, {}, resolve));
+  assert.equal(result.ok, true);
+  await onAlarm({ name: 'inline-reservation-open' });
+  assert.equal(opened.length, 2);
+  for (const options of opened) {
+    const prefill = JSON.parse(Buffer.from(new URL(options.url).searchParams.get('pre_filled_form'), 'base64').toString());
+    assert.equal(prefill.date, '2026-10-17');
+  }
+  assert.equal(stored.lastSelectedDate, '2026-10-17');
 }
 
 async function testUpdateStopsTask(reload) {
@@ -140,10 +199,14 @@ async function testUpdateStopsTask(reload) {
 
 Promise.all([
   testPopupModes(),
+  testFilteredStartup(),
   testUpdateStopsTask(false),
   testUpdateStopsTask(true),
   testFinalMode(false, {}, {}, '預演完成'),
   testFinalMode(true),
+  testFinalMode(true, { dayType: 'weekday' }),
+  testFinalMode(false, { dayType: 'weekend' }, {}, '日期不符'),
+  testFinalMode(true, { dayType: 'weekend' }, {}, '日期不符'),
   testFinalMode(true, {}, {}, '缺必填', { missingRequired: true }),
   testFinalMode(true, {}, {}, '等待頁面', { disabled: true }),
   testFinalMode(false, {}, {}, '待手動授權', { authorization: true }),
