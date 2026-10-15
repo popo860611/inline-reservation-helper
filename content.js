@@ -635,8 +635,15 @@
       const modalConsentControl = findManualConsentControl({ modalOnly: true });
       if (waitForManualConsent(modalConsentControl)) return;
       hideConsentNotice();
+      const firstDate = InlineHelperCommon.nextMatchingDate(reservation.dateStart, reservation.dateEnd, reservation.dayType);
+      if (!firstDate && !detailsVisible) {
+        watchForProgress = false;
+        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+        report("沒有日期", "日期區間內沒有符合日期類型的日期，請調整區間或日期類型。", "error");
+        return;
+      }
       if (!helperUrl && !detailsVisible && !state.timeSelectedAt) {
-        await navigateToDate(reservation, reservation.dateStart);
+        await navigateToDate(reservation, firstDate);
         return;
       }
 
@@ -659,15 +666,27 @@
         }
       }
 
-      const { lastSelectedDate } = await chrome.storage.local.get("lastSelectedDate");
-      document.documentElement.dataset.inlineHelperTargetDate = lastSelectedDate || reservation.dateStart;
+      const storedDate = (await chrome.storage.local.get("lastSelectedDate")).lastSelectedDate;
+      const lastSelectedDate = storedDate && storedDate >= reservation.dateStart && storedDate <= reservation.dateEnd &&
+        InlineHelperCommon.dateMatchesDayType(storedDate, reservation.dayType) ? storedDate : firstDate;
+      document.documentElement.dataset.inlineHelperTargetDate = lastSelectedDate;
       const shownDate = pageSelectedDate();
+      const verifiedFlowDate = shownDate?.value || state.selectedDate;
+      if (detailsVisible && verifiedFlowDate && !InlineHelperCommon.dateMatchesDayType(verifiedFlowDate, reservation.dayType)) {
+        watchForProgress = false;
+        await chrome.storage.local.set({ reservation: { ...reservation, enabled: false } });
+        report("日期不符", "目前訂位日期不符合日期類型，已停止；請核對 inline 頁面並調整設定。", "error");
+        return;
+      }
+      if (!detailsVisible && storedDate !== lastSelectedDate) {
+        await chrome.storage.local.set({ lastSelectedDate });
+      }
       if (adultPicker && shownDate && lastSelectedDate && shownDate.value !== lastSelectedDate) {
         const dateResult = selectTargetCalendarDate(lastSelectedDate, shownDate.element);
         if (["selected", "opening", "navigating"].includes(dateResult)) return;
         if (dateResult === "unavailable") {
-          const following = nextDate(lastSelectedDate);
-          if (following <= reservation.dateEnd) {
+          const following = InlineHelperCommon.nextMatchingDate(nextDate(lastSelectedDate), reservation.dateEnd, reservation.dayType);
+          if (following) {
             await chrome.storage.local.set({ lastSelectedDate: following });
             report("下一天", `${lastSelectedDate} 無法選擇，接著檢查 ${following}`);
             setTimeout(advance, FAST_STEP_MS);
@@ -738,8 +757,8 @@
         const noAvailability = /(?:當日|本日|當天|此日期|所選日期).{0,20}(?:無|沒有|已無).{0,10}(?:空位|時段)|沒有可預訂的時段|無可用時段/.test(pageText());
         if (!loading && (findTimeButtons({ includeUnavailable: true }).length || noAvailability)) {
           const current = lastSelectedDate || reservation.dateStart;
-          const following = nextDate(current);
-          if (following <= reservation.dateEnd) {
+          const following = InlineHelperCommon.nextMatchingDate(nextDate(current), reservation.dateEnd, reservation.dayType);
+          if (following) {
             report("下一天", `${current} 沒有區間內時段，接著檢查 ${following}`);
             await navigateToDate(reservation, following);
           } else {
@@ -863,6 +882,7 @@
         const verifiedMinutes = selectedTime
           ? InlineHelperCommon.timeToMinutes(selectedTime.textContent) : state.selectedMinutes;
         if (!verifiedDate || verifiedDate < reservation.dateStart || verifiedDate > reservation.dateEnd ||
+            !InlineHelperCommon.dateMatchesDayType(verifiedDate, reservation.dayType) ||
             !Number.isFinite(verifiedMinutes) ||
             verifiedMinutes < InlineHelperCommon.timeToMinutes(reservation.timeStart) ||
             verifiedMinutes > InlineHelperCommon.timeToMinutes(reservation.timeEnd)) {

@@ -63,7 +63,8 @@ function utf8ToBase64(value) {
 function buildBookingUrl(reservation) {
   const normalized = InlineHelperCommon.normalizeRestaurantInput(reservation.restaurantQuery);
   if (normalized.kind !== "url") throw new Error("找不到有效的 inline 官方訂位網址，請重新貼上網址。");
-  const selectedDate = reservation.dateStart;
+  const selectedDate = InlineHelperCommon.nextMatchingDate(reservation.dateStart, reservation.dateEnd, reservation.dayType);
+  if (!selectedDate) throw new Error("日期區間內沒有符合日期類型的日期，請調整區間或日期類型。");
   const prefilled = {
     language: reservation.language || "zh",
     date: selectedDate,

@@ -2,6 +2,7 @@ const fields = {
   restaurantQuery: document.querySelector("#restaurant-query"),
   dateStart: document.querySelector("#date-start"),
   dateEnd: document.querySelector("#date-end"),
+  dayType: document.querySelector("#day-type"),
   timeStart: document.querySelector("#time-start"),
   timeEnd: document.querySelector("#time-end"),
   adults: document.querySelector("#adults"),
@@ -226,7 +227,14 @@ function validate(reservation, scheduling = false) {
     throw new Error("請確認日期區間，結束日期不可早於開始日期。");
   }
   const days = Math.floor((new Date(reservation.dateEnd) - new Date(reservation.dateStart)) / 86400000) + 1;
-  if (days > 14) throw new Error("一次最多搜尋 14 天，請縮小日期區間。");
+  if (days > 60) throw new Error("日期區間最多 60 個日曆天，請縮小日期區間。");
+  const matchingDays = InlineHelperCommon.countMatchingDates(reservation.dateStart, reservation.dateEnd, reservation.dayType);
+  if (matchingDays > 30) {
+    throw new Error(`日期區間內有 ${matchingDays} 個符合條件的日期，一次最多搜尋 30 個；請縮小日期區間或調整日期類型。`);
+  }
+  if (!matchingDays) {
+    throw new Error("日期區間內沒有符合日期類型的日期，請調整區間或日期類型。");
+  }
   if (!reservation.timeStart || !reservation.timeEnd || reservation.timeStart > reservation.timeEnd) {
     throw new Error("請確認時間區間，最晚時間不可早於最早時間。");
   }
@@ -278,6 +286,7 @@ async function restore() {
   const { reservation, lastOpenedAt, flowStatus, flowStatusKind, lastSelectedDate } = await chrome.storage.local.get([
     "reservation", "lastOpenedAt", "flowStatus", "flowStatusKind", "lastSelectedDate"
   ]);
+  fields.dayType.value = reservation?.dayType || "all";
   fields.dateStart.value ||= localDate(1);
   fields.dateEnd.value ||= localDate(7);
   if (reservation) {
