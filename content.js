@@ -1,6 +1,6 @@
 (() => {
   const HELPER_KEY = "inlineHelperFlowV2";
-  const CONTENT_VERSION = "0.3.51";
+  const CONTENT_VERSION = "0.3.52";
   const FAST_STEP_MS = 80;
   const NAVIGATION_STEP_MS = 240;
   if (document.documentElement.dataset.inlineHelperVersion === CONTENT_VERSION) return;
